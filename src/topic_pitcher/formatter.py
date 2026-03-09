@@ -1,0 +1,69 @@
+from datetime import datetime, timedelta, timezone
+from typing import Iterable, List
+
+from .models import EvidenceItem, TopicDigest
+from .ranking import summarize_reason
+
+
+KST = timezone(timedelta(hours=9))
+
+
+def _metric_summary(item: EvidenceItem) -> str:
+    if item.source == "reddit":
+        return "업보트 {:.0f} / 댓글 {:.0f}".format(
+            item.metrics.get("score", 0.0),
+            item.metrics.get("comments", 0.0),
+        )
+    if item.source == "hacker_news":
+        return "점수 {:.0f} / 댓글 {:.0f}".format(
+            item.metrics.get("score", 0.0),
+            item.metrics.get("comments", 0.0),
+        )
+    if item.source == "youtube":
+        return "조회수 {:.0f} / 좋아요 {:.0f} / 댓글 {:.0f}".format(
+            item.metrics.get("views", 0.0),
+            item.metrics.get("likes", 0.0),
+            item.metrics.get("comments", 0.0),
+        )
+    if item.source == "naver_news":
+        return "검색 노출량 {:.0f}".format(item.metrics.get("total", 0.0))
+    if item.source == "google_news_kr":
+        return "한국 매체 확산 신호"
+    return "매체 확산 신호"
+
+
+def format_digest(
+    digests: Iterable[TopicDigest],
+    generated_at: datetime,
+    errors: List[str],
+    max_evidence_per_topic: int = 2,
+) -> str:
+    lines = []
+    lines.append("[경제 발제 랭킹] {}".format(generated_at.astimezone(KST).strftime("%Y-%m-%d %H:%M KST")))
+    lines.append("")
+    for index, digest in enumerate(digests, start=1):
+        lines.append("{}. {}".format(index, digest.topic.label))
+        lines.append(
+            "점수 {:.2f} | 소셜 {:.2f} | 뉴스 {:.2f}".format(
+                digest.total_score,
+                digest.social_score,
+                digest.media_score,
+            )
+        )
+        for reason in summarize_reason(digest):
+            lines.append(reason)
+        lines.append("근거 링크:")
+        for item in digest.evidence[:max_evidence_per_topic]:
+            lines.append(
+                "- {} | {} | {}".format(
+                    item.publisher or item.source,
+                    _metric_summary(item),
+                    item.url,
+                )
+            )
+        lines.append("")
+    if errors:
+        lines.append("수집 경고:")
+        for error in errors:
+            lines.append("- {}".format(error))
+    return "\n".join(lines).strip()

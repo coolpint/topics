@@ -1,0 +1,11 @@
+[project]
+name = "topic-pitcher"
+version = "0.1.0"
+description = "Daily economic topic ranking from social and news signals"
+requires-python = ">=3.9"
+
+[project.scripts]
+topic-pitcher = "topic_pitcher.main:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
