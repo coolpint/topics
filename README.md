@@ -30,6 +30,8 @@ cp .env.example .env
 PYTHONPATH=src python3 -m topic_pitcher
 ```
 
+`.env`는 실행 시 자동으로 읽는다. 로컬에서는 `export` 없이 `.env` 파일만 채워두면 된다.
+
 JSON 디버그 출력:
 
 ```bash
