@@ -2,6 +2,8 @@
 
 경제 뉴스 발제를 위해 공개 반응 신호와 매체 확산 신호를 함께 랭킹하는 일일 시스템이다. 기본 소스는 `Reddit` 업보트·댓글, `Hacker News` 점수·댓글수, `Google News RSS`의 매체 확산도이며, 한국 독자 가중치를 위해 `Google News KR`을 기본 포함한다. `YOUTUBE_API_KEY`가 있으면 YouTube 조회수·좋아요·댓글도 반영하고, `NAVER_CLIENT_ID`와 `NAVER_CLIENT_SECRET`이 있으면 네이버 뉴스 검색량까지 합산한다.
 
+최근 30일 안에 이미 보낸 유사 주제는 [data/topic_history.json](/Users/air/codes/topics/data/topic_history.json) 기준으로 피하고, 거시경제 일반론보다 구체적 현장·산업·소비 사례가 있는 토픽을 우선한다.
+
 ## 왜 이 소스를 썼나
 
 | 소스 | 공개 지표 | 랭킹에서의 역할 |
@@ -12,6 +14,12 @@
 | Google News KR | 한국어 경제기사 확산도 | 한국 독자 접점이 높은 경제 토픽에 가중치 부여 |
 | Naver News Search API (옵션) | 한국 포털 뉴스 검색량 | 한국 독자 검색 관심을 추가 반영 |
 | YouTube API (옵션) | 조회수, 좋아요, 댓글수 | 시청형 반응이 큰 경제 이슈 보강 |
+
+## 편집 원칙
+
+1. 같은 주제는 30일 안에 반복하지 않는다.
+2. 추상적 거시지표보다 `공항 보안검색`, `반려동물 미용`, `폐로 작업`, `방산 공장`처럼 장면이 그려지는 사안을 우선한다.
+3. 구체적 사례를 먼저 보여주고, 그 뒤에 금리·예산·산업구조 같은 큰 흐름을 붙인다.
 
 ## 현재 기준 추천 발제 5개
 
@@ -57,6 +65,8 @@ PYTHONPATH=src python3 -m topic_pitcher --send-telegram
 ## 원격 스케줄
 
 GitHub Actions 워크플로는 [daily-topic-pitch.yml](/Users/air/codes/topics/.github/workflows/daily-topic-pitch.yml)에 있다. `cron: "30 23 * * *"` 는 UTC 기준 23:30이며, 한국 시간으로는 매일 오전 8시 30분이다.
+
+발송이 끝나면 최신 발제 이력은 [data/topic_history.json](/Users/air/codes/topics/data/topic_history.json)에 기록되고, 워크플로가 그 파일을 자동 커밋해 다음 런에서 재사용한다.
 
 필수 GitHub Secrets:
 

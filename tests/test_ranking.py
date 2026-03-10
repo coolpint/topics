@@ -2,6 +2,7 @@ import unittest
 from datetime import datetime, timezone
 
 from topic_pitcher.models import EvidenceItem, TopicDefinition
+from topic_pitcher.history import select_fresh_topics
 from topic_pitcher.ranking import looks_economic, rank_topics
 from topic_pitcher.taxonomy import TOPIC_DEFINITIONS
 
@@ -85,6 +86,53 @@ class RankingTests(unittest.TestCase):
         ranked = rank_topics(items, [topic], now=NOW, top_n=1)
         self.assertEqual(ranked[0].topic.slug, "oil_inflation")
         self.assertGreater(ranked[0].total_score, 3.0)
+
+    def test_recent_topic_history_filters_similar_slug(self):
+        topic = TopicDefinition(
+            slug="premium_pet_spending",
+            label="반려동물 프리미엄 소비와 펫서비스 산업",
+            news_queries=[],
+            keywords=["반려동물", "미용", "펫서비스"],
+            why_now="",
+            reader_fit="",
+            korea_queries=["반려동물 미용 프리미엄 소비"],
+            korea_relevance=1.2,
+            story_bias=1.3,
+        )
+        digest = rank_topics(
+            [
+                EvidenceItem(
+                    source="google_news_kr",
+                    source_type="news",
+                    title="반려동물 미용 프리미엄 소비가 커지며 펫서비스 산업 확대",
+                    url="https://example.com/pet",
+                    published_at=NOW,
+                    publisher="한국경제",
+                    topic_hint="premium_pet_spending",
+                    metrics={"mentions": 1},
+                    snippet="반려동물 미용 프리미엄 소비 펫서비스 산업 확대",
+                    audience_region="KR",
+                )
+            ],
+            [topic],
+            now=NOW,
+            top_n=1,
+        )
+        fresh, skipped = select_fresh_topics(
+            digest,
+            [
+                {
+                    "sent_at": NOW.isoformat(),
+                    "slug": "premium_pet_spending",
+                    "label": "반려동물 프리미엄 소비와 펫서비스 산업",
+                    "terms": ["반려동물", "미용", "펫서비스"],
+                }
+            ],
+            NOW,
+            limit=1,
+        )
+        self.assertEqual(fresh, [])
+        self.assertEqual(skipped, ["반려동물 프리미엄 소비와 펫서비스 산업"])
 
 
 if __name__ == "__main__":

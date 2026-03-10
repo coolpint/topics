@@ -7,6 +7,56 @@ from urllib.parse import urlparse
 from .models import EvidenceItem, TopicDefinition, TopicDigest
 from .taxonomy import ANTI_KEYWORDS, GLOBAL_ECON_KEYWORDS
 
+MICRO_SIGNAL_TERMS = [
+    "pet",
+    "groom",
+    "airport",
+    "security",
+    "worker",
+    "factory",
+    "plant",
+    "store",
+    "salon",
+    "service",
+    "subscription",
+    "defense",
+    "munition",
+    "shipyard",
+    "transformer",
+    "utility bill",
+    "decommissioning",
+    "fukushima",
+    "반려동물",
+    "미용",
+    "공항",
+    "보안검색",
+    "작업자",
+    "현장",
+    "공장",
+    "방산",
+    "변압기",
+    "전기요금",
+    "폐로",
+]
+
+MACRO_ONLY_TERMS = [
+    "economy",
+    "inflation",
+    "growth",
+    "gdp",
+    "fed",
+    "jobs",
+    "market",
+    "rates",
+    "경제",
+    "물가",
+    "성장률",
+    "연준",
+    "고용",
+    "증시",
+    "금리",
+]
+
 
 def _normalize(text: str) -> str:
     lowered = text.lower()
@@ -72,6 +122,19 @@ def _source_score(item: EvidenceItem, now: datetime) -> float:
     return 2.0 * freshness
 
 
+def _specificity_score(item: EvidenceItem) -> float:
+    haystack = _normalize(item.title)
+    micro_hits = sum(1 for term in MICRO_SIGNAL_TERMS if _contains_term(haystack, term))
+    macro_hits = sum(1 for term in MACRO_ONLY_TERMS if _contains_term(haystack, term))
+    numeric_bonus = 0.35 if re.search(r"\d", item.title) else 0.0
+    person_bonus = 0.25 if any(
+        _contains_term(haystack, term)
+        for term in ["worker", "groom", "operator", "driver", "customer", "작업자", "직원", "소비자", "청년"]
+    ) else 0.0
+    penalty = 0.25 if macro_hits >= 2 and micro_hits == 0 else 0.0
+    return min(2.0, micro_hits * 0.3 + numeric_bonus + person_bonus) - penalty
+
+
 def _is_social(item: EvidenceItem) -> bool:
     return item.source in {"reddit", "hacker_news", "youtube"}
 
@@ -124,7 +187,7 @@ def rank_topics(
             for keyword in topic.keywords:
                 if _contains_term(_normalize(item.snippet or item.title), keyword):
                     digest.matched_keywords.add(keyword)
-            score = _source_score(item, now)
+            score = _source_score(item, now) * max(0.85, 1.0 + 0.06 * _specificity_score(item))
             if _is_social(item):
                 digest.social_score += score
             else:
@@ -140,7 +203,7 @@ def rank_topics(
         keyword_bonus = min(len(digest.matched_keywords), 4) * 0.25
         korean_signal_bonus = 1.0 if any(_is_korean_signal(item) for item in digest.evidence) else 0.0
         digest.total_score += breadth_bonus + bridge_bonus + keyword_bonus + korean_signal_bonus
-        digest.total_score *= digest.topic.korea_relevance
+        digest.total_score *= digest.topic.korea_relevance * digest.topic.story_bias
         digest.evidence.sort(key=lambda item: _source_score(item, now), reverse=True)
         ranked.append(digest)
     ranked.sort(key=lambda item: item.total_score, reverse=True)
@@ -158,6 +221,8 @@ def summarize_reason(digest: TopicDigest) -> List[str]:
             evidence_count, social_count, media_count
         )
     )
+    if digest.evidence:
+        lines.append("핵심 장면: {}".format(digest.evidence[0].title))
     korean_count = sum(1 for item in digest.evidence if _is_korean_signal(item))
     if korean_count:
         lines.append("한국 독자 신호: 한국 소스 {}건이 함께 잡혔습니다.".format(korean_count))
@@ -185,6 +250,6 @@ def summarize_reason(digest: TopicDigest) -> List[str]:
                     top_social.metrics.get("comments", 0.0),
                 )
             )
+    lines.append("큰 그림: {}".format(digest.topic.why_now))
     lines.append("경제 독자 관점: {}".format(digest.topic.reader_fit))
-    lines.append("현재성: {}".format(digest.topic.why_now))
     return lines

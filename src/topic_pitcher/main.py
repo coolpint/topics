@@ -5,6 +5,7 @@ from typing import List
 
 from .config import AppConfig
 from .formatter import format_digest
+from .history import load_history, save_history, select_fresh_topics
 from .ranking import rank_topics
 from .sources import collect_all_sources
 from .taxonomy import TOPIC_DEFINITIONS
@@ -30,6 +31,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="Print a JSON payload instead of the Telegram-friendly text digest.",
+    )
+    parser.add_argument(
+        "--history-path",
+        default="data/topic_history.json",
+        help="Path to the persisted topic history used to avoid repeating recent topics.",
     )
     return parser
 
@@ -66,14 +72,32 @@ def main(argv=None) -> int:
     config = AppConfig.from_env()
     items, errors = collect_all_sources(config, TOPIC_DEFINITIONS)
     now = datetime.now(timezone.utc)
-    digests = rank_topics(items, TOPIC_DEFINITIONS, now=now, top_n=args.max_topics)
+    history = load_history(args.history_path)
+    ranked_digests = rank_topics(items, TOPIC_DEFINITIONS, now=now, top_n=len(TOPIC_DEFINITIONS))
+    digests, skipped_recent = select_fresh_topics(
+        ranked_digests,
+        history,
+        now,
+        limit=args.max_topics,
+    )
     if args.json:
-        print(json.dumps({"generated_at": now.isoformat(), "topics": _serialize(digests), "errors": errors}, indent=2))
+        print(
+            json.dumps(
+                {
+                    "generated_at": now.isoformat(),
+                    "topics": _serialize(digests),
+                    "skipped_recent": skipped_recent,
+                    "errors": errors,
+                },
+                indent=2,
+            )
+        )
         return 0
     message = format_digest(digests, now, errors)
     print(message)
     if args.send_telegram:
         send_message(config.telegram_bot_token, config.telegram_chat_id, message)
+        save_history(args.history_path, digests, now)
     return 0
 
 

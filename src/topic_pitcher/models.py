@@ -14,6 +14,7 @@ class TopicDefinition:
     youtube_query: str = ""
     korea_queries: List[str] = field(default_factory=list)
     korea_relevance: float = 1.0
+    story_bias: float = 1.0
 
 
 @dataclass
