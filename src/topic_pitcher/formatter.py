@@ -32,6 +32,17 @@ def _metric_summary(item: EvidenceItem) -> str:
     return "매체 확산 신호"
 
 
+def _display_headline(digest: TopicDigest, max_length: int = 90) -> str:
+    if not digest.evidence:
+        return digest.topic.label
+    item = digest.evidence[0]
+    publisher = (item.publisher or item.source).strip()
+    headline = "{} | {}".format(publisher, item.title.strip())
+    if len(headline) <= max_length:
+        return headline
+    return headline[: max_length - 3].rstrip() + "..."
+
+
 def format_digest(
     digests: Iterable[TopicDigest],
     generated_at: datetime,
@@ -42,7 +53,8 @@ def format_digest(
     lines.append("[경제 발제 랭킹] {}".format(generated_at.astimezone(KST).strftime("%Y-%m-%d %H:%M KST")))
     lines.append("")
     for index, digest in enumerate(digests, start=1):
-        lines.append("{}. {}".format(index, digest.topic.label))
+        lines.append("{}. {}".format(index, _display_headline(digest)))
+        lines.append("이 사례로 보는 흐름: {}".format(digest.topic.label))
         lines.append(
             "점수 {:.2f} | 소셜 {:.2f} | 뉴스 {:.2f}".format(
                 digest.total_score,

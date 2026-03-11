@@ -1,10 +1,15 @@
 import json
+import os
 from typing import Any, Dict, Optional
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
-USER_AGENT = "topic-pitcher/0.1 (+https://github.com/)"
+USER_AGENT = os.getenv(
+    "TOPIC_USER_AGENT",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 topic-pitcher/0.1",
+)
 
 
 def build_url(base: str, params: Optional[Dict[str, Any]] = None) -> str:

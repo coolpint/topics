@@ -12,31 +12,77 @@ MICRO_SIGNAL_TERMS = [
     "groom",
     "airport",
     "security",
+    "queue",
+    "terminal",
     "worker",
     "factory",
     "plant",
     "store",
+    "shop",
     "salon",
     "service",
     "subscription",
     "defense",
     "munition",
     "shipyard",
+    "order backlog",
+    "contract",
     "transformer",
+    "substation",
     "utility bill",
+    "utility",
+    "utilities",
+    "server",
+    "rack",
     "decommissioning",
     "fukushima",
+    "gas station",
+    "gas price",
+    "fuel surcharge",
+    "tanker",
+    "refinery",
+    "airline",
+    "trucker",
+    "homebuyer",
+    "realtor",
+    "builder",
+    "tenant",
+    "landlord",
+    "coupon",
+    "mall",
+    "restaurant",
+    "developer",
+    "delivery rider",
     "반려동물",
     "미용",
     "공항",
     "보안검색",
+    "대기열",
+    "터미널",
     "작업자",
     "현장",
     "공장",
     "방산",
+    "수주",
+    "수주잔고",
     "변압기",
+    "변전소",
     "전기요금",
+    "서버",
     "폐로",
+    "주유소",
+    "휘발유값",
+    "유조선",
+    "정유",
+    "항공사",
+    "운임",
+    "주택구매자",
+    "세입자",
+    "집주인",
+    "분양",
+    "상가",
+    "식당",
+    "개발업체",
 ]
 
 MACRO_ONLY_TERMS = [
@@ -56,6 +102,66 @@ MACRO_ONLY_TERMS = [
     "증시",
     "금리",
 ]
+
+CONCRETE_ROLE_TERMS = [
+    "worker",
+    "operator",
+    "driver",
+    "customer",
+    "founder",
+    "investor",
+    "traveler",
+    "passenger",
+    "commuter",
+    "homebuyer",
+    "renter",
+    "tenant",
+    "landlord",
+    "worker",
+    "owner",
+    "작업자",
+    "직원",
+    "소비자",
+    "청년",
+    "승객",
+    "투자자",
+    "사장",
+    "입주민",
+]
+
+COMPANY_OR_PLACE_TERMS = [
+    "inc",
+    "corp",
+    "group",
+    "bank",
+    "energy",
+    "airlines",
+    "airport",
+    "tsa",
+    "terminal",
+    "plant",
+    "factory",
+    "refinery",
+    "shipyard",
+    "mall",
+    "restaurant",
+    "station",
+    "campus",
+    "terminal",
+    "공항",
+    "터미널",
+    "공장",
+    "정유",
+    "조선소",
+    "상가",
+    "식당",
+    "발전소",
+]
+
+CONCRETE_NUMBER_PATTERN = re.compile(
+    r"(\$|€|£|¥|원|달러|만원|억원|조원|%|\b\d{1,3}(?:,\d{3})+\b|\b\d+\b\s?(?:year-old|세|명|개|배|시간|억|만|million|billion))",
+    re.IGNORECASE,
+)
 
 
 def _normalize(text: str) -> str:
@@ -79,13 +185,19 @@ def looks_economic(item: EvidenceItem) -> bool:
 
 def match_topics(item: EvidenceItem, topic_definitions: Iterable[TopicDefinition]) -> List[TopicDefinition]:
     haystack = _normalize(item.snippet or item.title)
+    title_haystack = _normalize(item.title)
     matches: List[TopicDefinition] = []
     for topic in topic_definitions:
-        if item.topic_hint and item.topic_hint == topic.slug:
-            matches.append(topic)
+        keyword_hits = {keyword for keyword in topic.keywords if _contains_term(haystack, keyword)}
+        title_hits = {keyword for keyword in topic.keywords if _contains_term(title_haystack, keyword)}
+        topic_hint_match = item.topic_hint and item.topic_hint == topic.slug
+        if not title_hits:
             continue
-        keyword_hits = [keyword for keyword in topic.keywords if _contains_term(haystack, keyword)]
-        if len(keyword_hits) >= 2:
+        if not topic_hint_match and len(keyword_hits) < 2:
+            continue
+        if item.source != "naver_news" and _specificity_score(item) <= 0:
+            continue
+        if len(keyword_hits) >= 2 or topic_hint_match:
             matches.append(topic)
     return matches
 
@@ -126,13 +238,16 @@ def _specificity_score(item: EvidenceItem) -> float:
     haystack = _normalize(item.title)
     micro_hits = sum(1 for term in MICRO_SIGNAL_TERMS if _contains_term(haystack, term))
     macro_hits = sum(1 for term in MACRO_ONLY_TERMS if _contains_term(haystack, term))
-    numeric_bonus = 0.35 if re.search(r"\d", item.title) else 0.0
+    numeric_bonus = 0.4 if CONCRETE_NUMBER_PATTERN.search(item.title) else 0.0
     person_bonus = 0.25 if any(
         _contains_term(haystack, term)
-        for term in ["worker", "groom", "operator", "driver", "customer", "작업자", "직원", "소비자", "청년"]
+        for term in CONCRETE_ROLE_TERMS + ["groom"]
     ) else 0.0
-    penalty = 0.25 if macro_hits >= 2 and micro_hits == 0 else 0.0
-    return min(2.0, micro_hits * 0.3 + numeric_bonus + person_bonus) - penalty
+    entity_bonus = 0.2 if any(_contains_term(haystack, term) for term in COMPANY_OR_PLACE_TERMS) else 0.0
+    base_score = micro_hits * 0.28 + numeric_bonus + person_bonus + entity_bonus
+    proper_noun_bonus = 0.15 if base_score > 0 and re.search(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b", item.title) else 0.0
+    penalty = 0.35 if macro_hits >= 2 and micro_hits == 0 and numeric_bonus == 0 and person_bonus == 0 else 0.0
+    return min(2.2, base_score + proper_noun_bonus) - penalty
 
 
 def _is_social(item: EvidenceItem) -> bool:
@@ -162,6 +277,10 @@ def _publisher_label(item: EvidenceItem) -> str:
     return urlparse(item.url).netloc or item.source
 
 
+def _evidence_priority(item: EvidenceItem, now: datetime) -> float:
+    return _source_score(item, now) * max(0.85, 1.0 + 0.06 * _specificity_score(item))
+
+
 def rank_topics(
     items: Iterable[EvidenceItem],
     topic_definitions: Iterable[TopicDefinition],
@@ -187,24 +306,36 @@ def rank_topics(
             for keyword in topic.keywords:
                 if _contains_term(_normalize(item.snippet or item.title), keyword):
                     digest.matched_keywords.add(keyword)
-            score = _source_score(item, now) * max(0.85, 1.0 + 0.06 * _specificity_score(item))
-            if _is_social(item):
-                digest.social_score += score
-            else:
-                digest.media_score += score
-            digest.total_score += score
 
     ranked: List[TopicDigest] = []
     for digest in digests.values():
         if not digest.evidence:
             continue
-        breadth_bonus = 0.65 * len(digest.unique_sources) + 0.25 * len(digest.unique_publishers)
-        bridge_bonus = 1.1 if digest.social_score > 0 and digest.media_score > 0 else 0.0
+        digest.evidence.sort(key=lambda item: _evidence_priority(item, now), reverse=True)
+        core_evidence = digest.evidence[:3]
+        supporting_evidence = digest.evidence[3:7]
+        digest.social_score = sum(
+            _evidence_priority(item, now) for item in core_evidence if _is_social(item)
+        ) + 0.35 * sum(
+            _evidence_priority(item, now) for item in supporting_evidence if _is_social(item)
+        )
+        digest.media_score = sum(
+            _evidence_priority(item, now) for item in core_evidence if not _is_social(item)
+        ) + 0.35 * sum(
+            _evidence_priority(item, now) for item in supporting_evidence if not _is_social(item)
+        )
+        digest.total_score = digest.social_score + digest.media_score
+        breadth_bonus = 0.55 * len(digest.unique_sources) + 0.2 * len(digest.unique_publishers)
+        bridge_bonus = 1.0 if digest.social_score > 0 and digest.media_score > 0 else 0.0
         keyword_bonus = min(len(digest.matched_keywords), 4) * 0.25
         korean_signal_bonus = 1.0 if any(_is_korean_signal(item) for item in digest.evidence) else 0.0
-        digest.total_score += breadth_bonus + bridge_bonus + keyword_bonus + korean_signal_bonus
+        anchor_strength = max((_specificity_score(item) for item in digest.evidence), default=0.0)
+        concrete_evidence_count = sum(1 for item in digest.evidence if _specificity_score(item) > 0.2)
+        anchor_bonus = max(anchor_strength, 0.0) * 0.6 + min(concrete_evidence_count, 3) * 0.18
+        digest.total_score += breadth_bonus + bridge_bonus + keyword_bonus + korean_signal_bonus + anchor_bonus
+        if anchor_strength <= 0:
+            digest.total_score *= 0.22
         digest.total_score *= digest.topic.korea_relevance * digest.topic.story_bias
-        digest.evidence.sort(key=lambda item: _source_score(item, now), reverse=True)
         ranked.append(digest)
     ranked.sort(key=lambda item: item.total_score, reverse=True)
     return ranked[:top_n]
@@ -222,7 +353,13 @@ def summarize_reason(digest: TopicDigest) -> List[str]:
         )
     )
     if digest.evidence:
-        lines.append("핵심 장면: {}".format(digest.evidence[0].title))
+        top_item = digest.evidence[0]
+        lines.append(
+            "대표 사례: {}의 '{}'.".format(
+                top_item.publisher or top_item.source,
+                top_item.title,
+            )
+        )
     korean_count = sum(1 for item in digest.evidence if _is_korean_signal(item))
     if korean_count:
         lines.append("한국 독자 신호: 한국 소스 {}건이 함께 잡혔습니다.".format(korean_count))

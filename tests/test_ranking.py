@@ -32,31 +32,38 @@ class RankingTests(unittest.TestCase):
         item = make_item("google_news_kr", "국제유가 급등에 한국 수입물가 압박", {"mentions": 1}, source_type="news")
         self.assertTrue(looks_economic(item))
 
-    def test_cross_source_topic_ranking_prefers_macro_signal(self):
+    def test_concrete_story_outranks_broader_macro_topic(self):
         items = [
             make_item(
                 "reddit",
-                "US jobs report shows payroll losses and higher unemployment as Fed rate cut bets shift",
-                {"score": 800, "comments": 160},
+                "TSA lines stretch through airport terminal as budget fight freezes hiring",
+                {"score": 220, "comments": 70},
+                publisher="r/news",
+            ),
+            make_item(
+                "google_news",
+                "Airport security wait times lengthen as staffing shortage hits checkpoints",
+                {"mentions": 1},
+                source_type="news",
+                publisher="WSJ",
+            ),
+            make_item(
+                "reddit",
+                "Oil prices surge again as inflation fears return",
+                {"score": 1000, "comments": 220},
                 publisher="r/Economics",
             ),
             make_item(
                 "google_news",
-                "US jobs report weakens as investors debate next Fed move",
+                "Crude jumps and markets brace for fresh inflation pressure",
                 {"mentions": 1},
                 source_type="news",
-                publisher="AP",
-            ),
-            make_item(
-                "reddit",
-                "AI data center electricity demand jumps as utilities brace for higher load",
-                {"score": 150, "comments": 30},
-                publisher="r/Futurology",
+                publisher="Reuters",
             ),
         ]
         ranked = rank_topics(items, TOPIC_DEFINITIONS, now=NOW, top_n=2)
-        self.assertEqual(ranked[0].topic.slug, "us_jobs_fed")
-        self.assertGreater(ranked[0].total_score, ranked[1].total_score)
+        self.assertEqual(ranked[0].topic.slug, "public_service_bottlenecks")
+        self.assertTrue(all(digest.topic.slug != "oil_inflation" for digest in ranked))
 
     def test_korean_signal_boosts_korea_relevant_topic(self):
         topic = TopicDefinition(
@@ -73,13 +80,13 @@ class RankingTests(unittest.TestCase):
             EvidenceItem(
                 source="google_news_kr",
                 source_type="news",
-                title="국제유가 상승에 한국 소비자물가 우려 확대",
+                title="국제유가 상승에 주유소 휘발유값 들썩, 한국 소비자물가 우려 확대",
                 url="https://example.com/kr-oil",
                 published_at=NOW,
                 publisher="한국경제",
                 topic_hint="oil_inflation",
                 metrics={"mentions": 1},
-                snippet="국제유가 상승 한국 소비자물가 우려 확대",
+                snippet="국제유가 상승 주유소 휘발유값 한국 소비자물가 우려 확대",
                 audience_region="KR",
             )
         ]
@@ -133,6 +140,75 @@ class RankingTests(unittest.TestCase):
         )
         self.assertEqual(fresh, [])
         self.assertEqual(skipped, ["반려동물 프리미엄 소비와 펫서비스 산업"])
+
+    def test_generic_title_with_relevant_body_does_not_match(self):
+        topic = TopicDefinition(
+            slug="ai_power_capex",
+            label="AI 데이터센터 전력·설비투자 경쟁",
+            news_queries=[],
+            keywords=["ai", "data center", "전력"],
+            why_now="",
+            reader_fit="",
+        )
+        ranked = rank_topics(
+            [
+                EvidenceItem(
+                    source="reddit",
+                    source_type="social",
+                    title="What are you buying during this downturn?",
+                    url="https://example.com/post",
+                    published_at=NOW,
+                    publisher="r/stocks",
+                    metrics={"score": 200, "comments": 80},
+                    snippet="What are you buying during this downturn? AI data center electricity play discussion",
+                )
+            ],
+            [topic],
+            now=NOW,
+            top_n=1,
+        )
+        self.assertEqual(ranked, [])
+
+    def test_topic_hint_does_not_override_macro_only_title(self):
+        ranked = rank_topics(
+            [
+                EvidenceItem(
+                    source="google_news",
+                    source_type="news",
+                    title="Oil prices rise as inflation worries grow",
+                    url="https://example.com/oil",
+                    published_at=NOW,
+                    publisher="Reuters",
+                    topic_hint="oil_inflation",
+                    metrics={"mentions": 1},
+                    snippet="Oil prices rise as inflation worries grow",
+                )
+            ],
+            TOPIC_DEFINITIONS,
+            now=NOW,
+            top_n=5,
+        )
+        self.assertTrue(all(digest.topic.slug != "oil_inflation" for digest in ranked))
+
+    def test_duplicate_topic_keywords_do_not_create_false_match(self):
+        ranked = rank_topics(
+            [
+                EvidenceItem(
+                    source="hacker_news",
+                    source_type="social",
+                    title="Launch HN: Faster AI Inference on Apple Silicon",
+                    url="https://example.com/hn",
+                    published_at=NOW,
+                    publisher="news.ycombinator.com",
+                    metrics={"score": 180, "comments": 60},
+                    snippet="Launch HN: Faster AI Inference on Apple Silicon",
+                )
+            ],
+            TOPIC_DEFINITIONS,
+            now=NOW,
+            top_n=5,
+        )
+        self.assertTrue(all(digest.topic.slug != "ai_power_capex" for digest in ranked))
 
 
 if __name__ == "__main__":

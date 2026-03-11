@@ -81,8 +81,9 @@ class RedditSource:
         items: List[EvidenceItem] = []
         for subreddit in self.subreddits:
             payload = fetch_json(
-                "https://www.reddit.com/r/{}/top.json".format(subreddit),
+                "https://api.reddit.com/r/{}/top".format(subreddit),
                 params={"limit": 25, "t": "day", "raw_json": 1},
+                headers={"Accept": "application/json"},
             )
             children = payload.get("data", {}).get("children", [])
             for child in children:
