@@ -1,11 +1,13 @@
 import math
 import re
 from datetime import datetime, timezone
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Optional
 from urllib.parse import urlparse
 
 from .models import EvidenceItem, TopicDefinition, TopicDigest
 from .taxonomy import ANTI_KEYWORDS, GLOBAL_ECON_KEYWORDS
+
+TREND_ONLY_SOURCES = {"naver_news", "naver_datalab"}
 
 MICRO_SIGNAL_TERMS = [
     "pet",
@@ -195,7 +197,7 @@ def match_topics(item: EvidenceItem, topic_definitions: Iterable[TopicDefinition
             continue
         if not topic_hint_match and len(keyword_hits) < 2:
             continue
-        if item.source != "naver_news" and _specificity_score(item) <= 0:
+        if item.source not in TREND_ONLY_SOURCES and _specificity_score(item) <= 0:
             continue
         if len(keyword_hits) >= 2 or topic_hint_match:
             matches.append(topic)
@@ -226,9 +228,35 @@ def _source_score(item: EvidenceItem, now: datetime) -> float:
             + 0.9 * math.log1p(item.metrics.get("comments", 0.0))
         )
         return 1.1 * raw * freshness
+    if item.source == "bluesky":
+        raw = (
+            1.05 * math.log1p(item.metrics.get("likes", 0.0))
+            + 1.1 * math.log1p(item.metrics.get("reposts", 0.0))
+            + 1.0 * math.log1p(item.metrics.get("replies", 0.0))
+            + 0.9 * math.log1p(item.metrics.get("quotes", 0.0))
+        )
+        return 1.18 * raw * freshness
+    if item.source == "mastodon":
+        raw = 1.1 * math.log1p(item.metrics.get("uses", 0.0)) + 0.9 * math.log1p(
+            item.metrics.get("accounts", 0.0)
+        )
+        return 1.05 * raw * freshness
+    if item.source == "naver_blog":
+        total = min(item.metrics.get("total", 0.0), 5000.0)
+        position = item.metrics.get("position", 5.0)
+        return (0.95 * math.log1p(total) + max(0.0, 0.4 - 0.08 * (position - 1.0))) * freshness
+    if item.source == "naver_cafe":
+        total = min(item.metrics.get("total", 0.0), 5000.0)
+        position = item.metrics.get("position", 5.0)
+        return (1.0 * math.log1p(total) + max(0.0, 0.45 - 0.08 * (position - 1.0))) * freshness
     if item.source == "naver_news":
         total = min(item.metrics.get("total", 0.0), 5000.0)
         return 1.35 * math.log1p(total) * freshness
+    if item.source == "naver_datalab":
+        ratio = max(item.metrics.get("ratio", 0.0), 0.0)
+        delta = max(item.metrics.get("delta", 0.0), 0.0)
+        peak = max(item.metrics.get("peak", 0.0), ratio)
+        return 0.7 * math.log1p(ratio) + 0.8 * math.log1p(delta + 1.0) + 0.35 * math.log1p(peak + 1.0)
     if item.source == "google_news_kr":
         return 2.45 * freshness
     return 2.0 * freshness
@@ -251,7 +279,7 @@ def _specificity_score(item: EvidenceItem) -> float:
 
 
 def _is_social(item: EvidenceItem) -> bool:
-    return item.source in {"reddit", "hacker_news", "youtube"}
+    return item.source in {"reddit", "hacker_news", "youtube", "bluesky", "mastodon", "naver_blog", "naver_cafe"}
 
 
 def _is_korean_signal(item: EvidenceItem) -> bool:
@@ -268,6 +296,19 @@ def _passes_minimum_signal(item: EvidenceItem) -> bool:
             item.metrics.get("views", 0.0) >= 1000.0
             or item.metrics.get("likes", 0.0) >= 50.0
         )
+    if item.source == "bluesky":
+        return (
+            item.metrics.get("likes", 0.0)
+            + item.metrics.get("reposts", 0.0)
+            + item.metrics.get("replies", 0.0)
+        ) >= 8.0
+    if item.source == "mastodon":
+        return (
+            item.metrics.get("uses", 0.0) >= 8.0
+            or item.metrics.get("accounts", 0.0) >= 5.0
+        )
+    if item.source in {"naver_blog", "naver_cafe"}:
+        return item.metrics.get("total", 0.0) >= 20.0
     return True
 
 
@@ -279,6 +320,15 @@ def _publisher_label(item: EvidenceItem) -> str:
 
 def _evidence_priority(item: EvidenceItem, now: datetime) -> float:
     return _source_score(item, now) * max(0.85, 1.0 + 0.06 * _specificity_score(item))
+
+
+def representative_evidence(digest: TopicDigest) -> Optional[EvidenceItem]:
+    for item in digest.evidence:
+        if item.source not in TREND_ONLY_SOURCES:
+            return item
+    if digest.evidence:
+        return digest.evidence[0]
+    return None
 
 
 def rank_topics(
@@ -352,8 +402,8 @@ def summarize_reason(digest: TopicDigest) -> List[str]:
             evidence_count, social_count, media_count
         )
     )
-    if digest.evidence:
-        top_item = digest.evidence[0]
+    top_item = representative_evidence(digest)
+    if top_item:
         lines.append(
             "대표 사례: {}의 '{}'.".format(
                 top_item.publisher or top_item.source,
@@ -378,6 +428,33 @@ def summarize_reason(digest: TopicDigest) -> List[str]:
                     top_social.metrics.get("views", 0.0),
                     top_social.metrics.get("likes", 0.0),
                     top_social.metrics.get("comments", 0.0),
+                )
+            )
+        elif top_social.source == "bluesky":
+            lines.append(
+                "반응 신호: Bluesky 좋아요 {:.0f}, 리포스트 {:.0f}, 답글 {:.0f}.".format(
+                    top_social.metrics.get("likes", 0.0),
+                    top_social.metrics.get("reposts", 0.0),
+                    top_social.metrics.get("replies", 0.0),
+                )
+            )
+        elif top_social.source == "mastodon":
+            lines.append(
+                "반응 신호: Mastodon 공유 {:.0f}, 계정 {:.0f}.".format(
+                    top_social.metrics.get("uses", 0.0),
+                    top_social.metrics.get("accounts", 0.0),
+                )
+            )
+        elif top_social.source == "naver_blog":
+            lines.append(
+                "반응 신호: 네이버 블로그 검색 결과 {:.0f}건.".format(
+                    top_social.metrics.get("total", 0.0),
+                )
+            )
+        elif top_social.source == "naver_cafe":
+            lines.append(
+                "반응 신호: 네이버 카페 검색 결과 {:.0f}건.".format(
+                    top_social.metrics.get("total", 0.0),
                 )
             )
         else:

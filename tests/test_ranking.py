@@ -210,6 +210,36 @@ class RankingTests(unittest.TestCase):
         )
         self.assertTrue(all(digest.topic.slug != "ai_power_capex" for digest in ranked))
 
+    def test_bluesky_signal_can_support_concrete_topic(self):
+        ranked = rank_topics(
+            [
+                EvidenceItem(
+                    source="bluesky",
+                    source_type="social",
+                    title="Atlanta travelers say TSA lines stretched past the terminal during shutdown",
+                    url="https://bsky.app/profile/example/post/1",
+                    published_at=NOW,
+                    publisher="Travel Watch",
+                    metrics={"likes": 80, "reposts": 20, "replies": 14, "quotes": 5},
+                    snippet="Atlanta travelers say TSA lines stretched past the terminal during shutdown",
+                ),
+                EvidenceItem(
+                    source="google_news",
+                    source_type="news",
+                    title="Airport security wait times lengthen as staffing shortage hits checkpoints",
+                    url="https://example.com/wsj",
+                    published_at=NOW,
+                    publisher="WSJ",
+                    metrics={"mentions": 1},
+                    snippet="Airport security wait times lengthen as staffing shortage hits checkpoints",
+                ),
+            ],
+            TOPIC_DEFINITIONS,
+            now=NOW,
+            top_n=2,
+        )
+        self.assertEqual(ranked[0].topic.slug, "public_service_bottlenecks")
+
 
 if __name__ == "__main__":
     unittest.main()

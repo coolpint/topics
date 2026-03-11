@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Iterable, List
 
 from .models import EvidenceItem, TopicDigest
-from .ranking import summarize_reason
+from .ranking import representative_evidence, summarize_reason
 
 
 KST = timezone(timedelta(hours=9))
@@ -25,17 +25,37 @@ def _metric_summary(item: EvidenceItem) -> str:
             item.metrics.get("likes", 0.0),
             item.metrics.get("comments", 0.0),
         )
+    if item.source == "bluesky":
+        return "좋아요 {:.0f} / 리포스트 {:.0f} / 답글 {:.0f}".format(
+            item.metrics.get("likes", 0.0),
+            item.metrics.get("reposts", 0.0),
+            item.metrics.get("replies", 0.0),
+        )
+    if item.source == "mastodon":
+        return "공유 {:.0f} / 계정 {:.0f}".format(
+            item.metrics.get("uses", 0.0),
+            item.metrics.get("accounts", 0.0),
+        )
+    if item.source == "naver_blog":
+        return "블로그 결과 {:.0f}".format(item.metrics.get("total", 0.0))
+    if item.source == "naver_cafe":
+        return "카페 결과 {:.0f}".format(item.metrics.get("total", 0.0))
     if item.source == "naver_news":
         return "검색 노출량 {:.0f}".format(item.metrics.get("total", 0.0))
+    if item.source == "naver_datalab":
+        return "검색지수 {:.1f} / 변화 {:+.1f}".format(
+            item.metrics.get("ratio", 0.0),
+            item.metrics.get("delta", 0.0),
+        )
     if item.source == "google_news_kr":
         return "한국 매체 확산 신호"
     return "매체 확산 신호"
 
 
 def _display_headline(digest: TopicDigest, max_length: int = 90) -> str:
-    if not digest.evidence:
+    item = representative_evidence(digest)
+    if not item:
         return digest.topic.label
-    item = digest.evidence[0]
     publisher = (item.publisher or item.source).strip()
     headline = "{} | {}".format(publisher, item.title.strip())
     if len(headline) <= max_length:

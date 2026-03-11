@@ -1,4 +1,5 @@
 import json
+import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
@@ -57,12 +58,33 @@ def _parse_datetime(value: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
+def _parse_iso_datetime(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+
+
+def _parse_compact_date(value: str, fallback: datetime) -> datetime:
+    if not value:
+        return fallback
+    try:
+        return datetime.strptime(value, "%Y%m%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return fallback
+
+
 def _domain_from_url(url: str) -> str:
     return urlparse(url).netloc.lower()
 
 
 def _item_text(title: str, snippet: str) -> str:
     return (title + " " + snippet).strip()
+
+
+def _strip_html(value: str) -> str:
+    return re.sub(r"<[^>]+>", " ", unescape(value or ""))
+
+
+def _clean_search_text(value: str) -> str:
+    return re.sub(r"\s+", " ", _strip_html(value)).strip()
 
 
 def _is_trusted_kr_publisher(publisher: str) -> bool:
@@ -151,6 +173,86 @@ class HackerNewsSource:
         return items
 
 
+class BlueskySource:
+    name = "bluesky"
+
+    def __init__(self, base_url: str, lookback_hours: int, topic_definitions: Sequence[TopicDefinition], limit: int):
+        self.base_url = base_url.rstrip("/")
+        self.lookback_hours = lookback_hours
+        self.topic_definitions = [topic for topic in topic_definitions if topic.news_queries]
+        self.limit = limit
+
+    def _build_post_url(self, handle: str, uri: str) -> str:
+        if not handle or not uri:
+            return "https://bsky.app"
+        rkey = uri.rsplit("/", 1)[-1]
+        return "https://bsky.app/profile/{}/post/{}".format(handle, rkey)
+
+    def collect(self, now: datetime) -> List[EvidenceItem]:
+        seen = set()
+        items: List[EvidenceItem] = []
+        for topic in self.topic_definitions:
+            for query in topic.news_queries[:1]:
+                payload = fetch_json(
+                    self.base_url + "/xrpc/app.bsky.feed.searchPosts",
+                    params={
+                        "q": query,
+                        "limit": self.limit,
+                    },
+                    headers={"Accept": "application/json"},
+                )
+                for post in payload.get("posts", []):
+                    author = post.get("author") or {}
+                    record = post.get("record") or {}
+                    text = (record.get("text") or "").strip()
+                    embed = post.get("embed") or {}
+                    external = embed.get("external") or {}
+                    title = text or (external.get("title") or "").strip()
+                    if not title:
+                        continue
+                    created_at = record.get("createdAt") or post.get("indexedAt")
+                    if not created_at:
+                        continue
+                    published_at = _parse_iso_datetime(created_at)
+                    if not _within_lookback(published_at, self.lookback_hours, now):
+                        continue
+                    url = self._build_post_url(author.get("handle", ""), post.get("uri", ""))
+                    dedupe_key = (title, url)
+                    if dedupe_key in seen:
+                        continue
+                    seen.add(dedupe_key)
+                    items.append(
+                        EvidenceItem(
+                            source=self.name,
+                            source_type="social",
+                            title=title,
+                            url=url,
+                            published_at=published_at,
+                            publisher=author.get("displayName") or author.get("handle", "Bluesky"),
+                            topic_hint=topic.slug,
+                            metrics={
+                                "likes": float(post.get("likeCount", 0)),
+                                "reposts": float(post.get("repostCount", 0)),
+                                "replies": float(post.get("replyCount", 0)),
+                                "quotes": float(post.get("quoteCount", 0)),
+                            },
+                            snippet=_item_text(
+                                title,
+                                " ".join(
+                                    value
+                                    for value in [
+                                        text,
+                                        external.get("title", ""),
+                                        external.get("description", ""),
+                                    ]
+                                    if value
+                                ),
+                            ),
+                        )
+                    )
+        return items
+
+
 class GoogleNewsSource:
     name = "google_news"
 
@@ -231,6 +333,234 @@ class GoogleNewsSource:
                             audience_region=self.audience_region,
                         )
                     )
+        return items
+
+
+class NaverCommunitySearchSource:
+    def __init__(
+        self,
+        *,
+        source_name: str,
+        api_path: str,
+        publisher_field: str,
+        search_type: str,
+        client_id: str,
+        client_secret: str,
+        topic_definitions: Sequence[TopicDefinition],
+        lookback_hours: int,
+    ):
+        self.name = source_name
+        self.api_path = api_path
+        self.publisher_field = publisher_field
+        self.search_type = search_type
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.topic_definitions = list(topic_definitions)
+        self.lookback_hours = lookback_hours
+
+    def collect(self, now: datetime) -> List[EvidenceItem]:
+        if not self.client_id or not self.client_secret:
+            return []
+        seen = set()
+        items: List[EvidenceItem] = []
+        for topic in self.topic_definitions:
+            for query in topic.korea_queries:
+                payload = fetch_json(
+                    "https://openapi.naver.com/v1/search/{}.json".format(self.api_path),
+                    params={
+                        "query": query,
+                        "display": 5,
+                        "sort": "date",
+                    },
+                    headers={
+                        "X-Naver-Client-Id": self.client_id,
+                        "X-Naver-Client-Secret": self.client_secret,
+                    },
+                )
+                total = float(payload.get("total", 0))
+                if total <= 0:
+                    continue
+                for position, result in enumerate(payload.get("items", [])[:3], start=1):
+                    title = _clean_search_text(result.get("title", ""))
+                    description = _clean_search_text(result.get("description", ""))
+                    link = (result.get("link") or "").strip()
+                    if not title or not link:
+                        continue
+                    dedupe_key = (title, link)
+                    if dedupe_key in seen:
+                        continue
+                    seen.add(dedupe_key)
+                    published_at = _parse_compact_date(result.get("postdate", ""), now)
+                    if not _within_lookback(published_at, self.lookback_hours, now):
+                        continue
+                    items.append(
+                        EvidenceItem(
+                            source=self.name,
+                            source_type="community",
+                            title=title,
+                            url=link,
+                            published_at=published_at,
+                            publisher=(result.get(self.publisher_field) or self.search_type).strip(),
+                            topic_hint=topic.slug,
+                            metrics={
+                                "total": total,
+                                "position": float(position),
+                            },
+                            snippet=_item_text(title, description),
+                            audience_region="KR",
+                        )
+                    )
+        return items
+
+
+class NaverDataLabSource:
+    name = "naver_datalab"
+
+    def __init__(
+        self,
+        client_id: str,
+        client_secret: str,
+        topic_definitions: Sequence[TopicDefinition],
+    ):
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.topic_definitions = list(topic_definitions)
+
+    def _keyword_groups(self) -> List[Tuple[TopicDefinition, List[str]]]:
+        groups: List[Tuple[TopicDefinition, List[str]]] = []
+        for topic in self.topic_definitions:
+            keywords: List[str] = []
+            for candidate in topic.korea_queries + topic.keywords:
+                if not re.search(r"[가-힣]", candidate):
+                    continue
+                if candidate in keywords:
+                    continue
+                keywords.append(candidate)
+                if len(keywords) == 5:
+                    break
+            if keywords:
+                groups.append((topic, keywords))
+        return groups
+
+    def collect(self, now: datetime) -> List[EvidenceItem]:
+        if not self.client_id or not self.client_secret:
+            return []
+        items: List[EvidenceItem] = []
+        groups = self._keyword_groups()
+        if not groups:
+            return items
+        start_date = (now - timedelta(days=6)).date().isoformat()
+        end_date = now.date().isoformat()
+        for offset in range(0, len(groups), 5):
+            batch = groups[offset : offset + 5]
+            payload = fetch_json(
+                "https://openapi.naver.com/v1/datalab/search",
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Naver-Client-Id": self.client_id,
+                    "X-Naver-Client-Secret": self.client_secret,
+                },
+                data=json.dumps(
+                    {
+                        "startDate": start_date,
+                        "endDate": end_date,
+                        "timeUnit": "date",
+                        "keywordGroups": [
+                            {
+                                "groupName": topic.slug,
+                                "keywords": keywords,
+                            }
+                            for topic, keywords in batch
+                        ],
+                    }
+                ).encode("utf-8"),
+                method="POST",
+            )
+            topic_map = {topic.slug: (topic, keywords) for topic, keywords in batch}
+            for result in payload.get("results", []):
+                topic_entry = topic_map.get(result.get("title", ""))
+                if not topic_entry:
+                    continue
+                topic, keywords = topic_entry
+                data_points = result.get("data", [])
+                if not data_points:
+                    continue
+                ratios = [float(point.get("ratio", 0.0)) for point in data_points]
+                latest_ratio = ratios[-1]
+                previous = ratios[:-1] or [0.0]
+                average_previous = sum(previous) / max(len(previous), 1)
+                delta = latest_ratio - average_previous
+                if latest_ratio <= 0 and delta <= 0:
+                    continue
+                items.append(
+                    EvidenceItem(
+                        source=self.name,
+                        source_type="trend",
+                        title="네이버 검색어 상승: {}".format(" / ".join(keywords[:2])),
+                        url="https://datalab.naver.com/",
+                        published_at=now,
+                        publisher="Naver DataLab",
+                        topic_hint=topic.slug,
+                        metrics={
+                            "ratio": latest_ratio,
+                            "delta": delta,
+                            "peak": max(ratios),
+                        },
+                        snippet="{} {}".format(topic.label, " ".join(keywords)).strip(),
+                        audience_region="KR",
+                    )
+                )
+        return items
+
+
+class MastodonLinkTrendSource:
+    name = "mastodon"
+
+    def __init__(self, base_urls: Sequence[str], lookback_hours: int, limit: int):
+        self.base_urls = [base_url.rstrip("/") for base_url in base_urls]
+        self.lookback_hours = lookback_hours
+        self.limit = limit
+
+    def collect(self, now: datetime) -> List[EvidenceItem]:
+        seen = set()
+        items: List[EvidenceItem] = []
+        for base_url in self.base_urls:
+            payload = fetch_json(
+                base_url + "/api/v1/trends/links",
+                params={"limit": self.limit},
+                headers={"Accept": "application/json"},
+            )
+            for entry in payload:
+                title = (entry.get("title") or "").strip()
+                link = (entry.get("url") or "").strip()
+                if not title or not link:
+                    continue
+                dedupe_key = (title, link)
+                if dedupe_key in seen:
+                    continue
+                seen.add(dedupe_key)
+                published_at_raw = entry.get("published_at")
+                published_at = _parse_iso_datetime(published_at_raw) if published_at_raw else now
+                if not _within_lookback(published_at, self.lookback_hours, now):
+                    continue
+                history = entry.get("history", [])
+                uses = max((float(point.get("uses", 0.0)) for point in history[:3]), default=0.0)
+                accounts = max((float(point.get("accounts", 0.0)) for point in history[:3]), default=0.0)
+                items.append(
+                    EvidenceItem(
+                        source=self.name,
+                        source_type="social",
+                        title=title,
+                        url=link,
+                        published_at=published_at,
+                        publisher=entry.get("provider_name", "Mastodon"),
+                        metrics={
+                            "uses": uses,
+                            "accounts": accounts,
+                        },
+                        snippet=_item_text(title, (entry.get("description") or "").strip()),
+                    )
+                )
         return items
 
 
@@ -390,8 +720,19 @@ class YouTubeSource:
 def collect_all_sources(config: AppConfig, topic_definitions: Sequence[TopicDefinition]) -> Tuple[List[EvidenceItem], List[str]]:
     now = _utc_now()
     sources = [
+        BlueskySource(
+            config.bluesky_base_url,
+            config.lookback_hours,
+            topic_definitions,
+            config.bluesky_limit,
+        ),
         RedditSource(config.reddit_subreddits, config.lookback_hours),
         HackerNewsSource(config.lookback_hours),
+        MastodonLinkTrendSource(
+            config.mastodon_base_urls,
+            config.lookback_hours,
+            config.mastodon_limit,
+        ),
         GoogleNewsSource(
             config.lookback_hours,
             topic_definitions,
@@ -417,6 +758,31 @@ def collect_all_sources(config: AppConfig, topic_definitions: Sequence[TopicDefi
             config.naver_client_secret,
             topic_definitions,
             config.lookback_hours,
+        ),
+        NaverCommunitySearchSource(
+            source_name="naver_blog",
+            api_path="blog",
+            publisher_field="bloggername",
+            search_type="Naver Blog",
+            client_id=config.naver_client_id,
+            client_secret=config.naver_client_secret,
+            topic_definitions=topic_definitions,
+            lookback_hours=config.lookback_hours,
+        ),
+        NaverCommunitySearchSource(
+            source_name="naver_cafe",
+            api_path="cafearticle",
+            publisher_field="cafename",
+            search_type="Naver Cafe",
+            client_id=config.naver_client_id,
+            client_secret=config.naver_client_secret,
+            topic_definitions=topic_definitions,
+            lookback_hours=config.lookback_hours,
+        ),
+        NaverDataLabSource(
+            config.naver_client_id,
+            config.naver_client_secret,
+            topic_definitions,
         ),
     ]
     if config.youtube_api_key:
