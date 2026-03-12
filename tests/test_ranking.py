@@ -125,7 +125,7 @@ class RankingTests(unittest.TestCase):
             now=NOW,
             top_n=1,
         )
-        fresh, skipped = select_fresh_topics(
+        fresh, skipped, used_recent_fallback = select_fresh_topics(
             digest,
             [
                 {
@@ -138,8 +138,55 @@ class RankingTests(unittest.TestCase):
             NOW,
             limit=1,
         )
-        self.assertEqual(fresh, [])
+        self.assertEqual(fresh, digest)
         self.assertEqual(skipped, ["반려동물 프리미엄 소비와 펫서비스 산업"])
+        self.assertTrue(used_recent_fallback)
+
+    def test_recent_duplicate_fallback_reuses_top_ranked_when_all_candidates_repeat(self):
+        topic = TopicDefinition(
+            slug="public_service_bottlenecks",
+            label="공항·공공서비스 병목과 예산 압박",
+            news_queries=[],
+            keywords=["공항", "보안검색", "예산"],
+            why_now="",
+            reader_fit="",
+        )
+        ranked = rank_topics(
+            [
+                EvidenceItem(
+                    source="google_news_kr",
+                    source_type="news",
+                    title="공항 보안검색 대기줄 길어지고 예산 압박 커진다",
+                    url="https://example.com/airport",
+                    published_at=NOW,
+                    publisher="한국경제",
+                    topic_hint="public_service_bottlenecks",
+                    metrics={"mentions": 1},
+                    snippet="공항 보안검색 대기줄 예산 압박",
+                    audience_region="KR",
+                )
+            ],
+            [topic],
+            now=NOW,
+            top_n=1,
+        )
+        fresh, skipped, used_recent_fallback = select_fresh_topics(
+            ranked,
+            [
+                {
+                    "sent_at": NOW.isoformat(),
+                    "slug": "public_service_bottlenecks",
+                    "label": "공항·공공서비스 병목과 예산 압박",
+                    "terms": ["공항", "보안검색", "예산", "대기줄"],
+                }
+            ],
+            NOW,
+            limit=1,
+        )
+        self.assertEqual(len(fresh), 1)
+        self.assertEqual(fresh[0].topic.slug, "public_service_bottlenecks")
+        self.assertEqual(skipped, ["공항·공공서비스 병목과 예산 압박"])
+        self.assertTrue(used_recent_fallback)
 
     def test_generic_title_with_relevant_body_does_not_match(self):
         topic = TopicDefinition(

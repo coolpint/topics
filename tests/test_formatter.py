@@ -95,6 +95,17 @@ class FormatterTests(unittest.TestCase):
 
         self.assertEqual(representative_evidence(digest).publisher, "Reuters")
 
+    def test_empty_digest_includes_notice_and_explanation(self):
+        message = format_digest(
+            [],
+            NOW,
+            ["reddit: HTTP Error 403: Blocked"],
+            notices=["최근 30일 중복 회피 규칙에 걸린 주제만 남아, 이번 발송은 상위 중복 후보를 다시 포함했습니다."],
+        )
+        self.assertIn("최근 30일 중복 회피 규칙에 걸린 주제만 남아", message)
+        self.assertIn("이번 실행에서는 기사화 가능한 신규 토픽을 충분히 확보하지 못했습니다.", message)
+        self.assertIn("수집 경고:", message)
+
 
 if __name__ == "__main__":
     unittest.main()

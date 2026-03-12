@@ -74,12 +74,21 @@ def main(argv=None) -> int:
     now = datetime.now(timezone.utc)
     history = load_history(args.history_path)
     ranked_digests = rank_topics(items, TOPIC_DEFINITIONS, now=now, top_n=len(TOPIC_DEFINITIONS))
-    digests, skipped_recent = select_fresh_topics(
+    digests, skipped_recent, used_recent_fallback = select_fresh_topics(
         ranked_digests,
         history,
         now,
         limit=args.max_topics,
     )
+    notices = []
+    if used_recent_fallback:
+        notices.append(
+            "최근 30일 중복 회피 규칙에 걸린 주제만 남아, 이번 발송은 상위 중복 후보를 다시 포함했습니다."
+        )
+    elif skipped_recent:
+        notices.append(
+            "최근 30일 안에 다룬 유사 주제 {}건은 제외했습니다.".format(len(skipped_recent))
+        )
     if args.json:
         print(
             json.dumps(
@@ -87,13 +96,14 @@ def main(argv=None) -> int:
                     "generated_at": now.isoformat(),
                     "topics": _serialize(digests),
                     "skipped_recent": skipped_recent,
+                    "used_recent_fallback": used_recent_fallback,
                     "errors": errors,
                 },
                 indent=2,
             )
         )
         return 0
-    message = format_digest(digests, now, errors)
+    message = format_digest(digests, now, errors, notices=notices)
     print(message)
     if args.send_telegram:
         send_message(config.telegram_bot_token, config.telegram_chat_id, message)

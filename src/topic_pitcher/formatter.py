@@ -85,12 +85,18 @@ def format_digest(
     digests: Iterable[TopicDigest],
     generated_at: datetime,
     errors: List[str],
+    notices: List[str] = None,
     max_evidence_per_topic: int = 2,
 ) -> str:
+    digest_list = list(digests)
     lines = []
     lines.append("[경제 발제 랭킹] {}".format(generated_at.astimezone(KST).strftime("%Y-%m-%d %H:%M KST")))
     lines.append("")
-    for index, digest in enumerate(digests, start=1):
+    for notice in notices or []:
+        lines.append(notice)
+    if notices:
+        lines.append("")
+    for index, digest in enumerate(digest_list, start=1):
         lines.append("{}. {}".format(index, _display_headline(digest)))
         lines.append("이 사례로 보는 흐름: {}".format(digest.topic.label))
         lines.append(
@@ -111,6 +117,9 @@ def format_digest(
                     item.url,
                 )
             )
+        lines.append("")
+    if not digest_list:
+        lines.append("이번 실행에서는 기사화 가능한 신규 토픽을 충분히 확보하지 못했습니다.")
         lines.append("")
     if errors:
         lines.append("수집 경고:")

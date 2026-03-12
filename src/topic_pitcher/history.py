@@ -80,9 +80,11 @@ def select_fresh_topics(
     now: datetime,
     limit: int,
     window_days: int = 30,
-) -> Tuple[List[TopicDigest], List[str]]:
+) -> Tuple[List[TopicDigest], List[str], bool]:
+    ranked_digests = list(digests)
     fresh: List[TopicDigest] = []
     skipped: List[str] = []
+    used_recent_fallback = False
     cutoff = now - timedelta(days=window_days)
     recent_entries = []
     for entry in history:
@@ -97,7 +99,7 @@ def select_fresh_topics(
             parsed = parsed.replace(tzinfo=timezone.utc)
         if parsed >= cutoff:
             recent_entries.append(entry)
-    for digest in digests:
+    for digest in ranked_digests:
         terms = _digest_terms(digest)
         duplicate = False
         for entry in recent_entries:
@@ -114,7 +116,10 @@ def select_fresh_topics(
         fresh.append(digest)
         if len(fresh) >= limit:
             break
-    return fresh, skipped
+    if not fresh and ranked_digests:
+        fresh = ranked_digests[:limit]
+        used_recent_fallback = True
+    return fresh, skipped, used_recent_fallback
 
 
 def save_history(history_path: str, digests: Iterable[TopicDigest], now: datetime, keep_days: int = 90) -> None:
