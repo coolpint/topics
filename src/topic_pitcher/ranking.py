@@ -8,6 +8,48 @@ from .models import EvidenceItem, TopicDefinition, TopicDigest
 from .taxonomy import ANTI_KEYWORDS, GLOBAL_ECON_KEYWORDS
 
 TREND_ONLY_SOURCES = {"naver_news", "naver_datalab"}
+TRUSTED_PUBLISHER_TOKENS = (
+    "reuters",
+    "bloomberg",
+    "wall street journal",
+    "wsj",
+    "financial times",
+    "ft",
+    "new york times",
+    "nyt",
+    "washington post",
+    "associated press",
+    "ap",
+    "bbc",
+    "cnbc",
+    "nikkei",
+    "economist",
+    "business insider",
+    "연합뉴스",
+    "한국경제",
+    "매일경제",
+    "서울경제",
+    "헤럴드경제",
+    "아시아경제",
+    "머니투데이",
+    "이데일리",
+    "조선비즈",
+    "파이낸셜뉴스",
+    "뉴시스",
+)
+LOW_CONFIDENCE_PUBLISHER_TOKENS = (
+    "meyka",
+    "tronweekly",
+    "financialcontent",
+    "national today",
+    "fine day 102.3",
+    "the tech buzz",
+    "devdiscourse",
+    "cryptorank",
+    "bitget",
+    "usa herald",
+    "aol.com",
+)
 
 MICRO_SIGNAL_TERMS = [
     "pet",
@@ -318,17 +360,62 @@ def _publisher_label(item: EvidenceItem) -> str:
     return urlparse(item.url).netloc or item.source
 
 
+def _publisher_quality(item: EvidenceItem) -> float:
+    label = "{} {}".format(item.publisher or "", urlparse(item.url).netloc or "").lower()
+    if any(token.lower() in label for token in TRUSTED_PUBLISHER_TOKENS):
+        return 1.35
+    if any(token.lower() in label for token in LOW_CONFIDENCE_PUBLISHER_TOKENS):
+        return 0.55
+    if item.source in {"naver_blog", "naver_cafe"}:
+        return 0.82
+    return 1.0
+
+
+def _representative_source_bonus(item: EvidenceItem) -> float:
+    if item.source in {"google_news", "google_news_kr", "youtube", "reddit", "hacker_news", "bluesky", "mastodon"}:
+        return 1.0
+    if item.source in {"naver_blog", "naver_cafe"}:
+        return 0.75
+    return 0.6
+
+
 def _evidence_priority(item: EvidenceItem, now: datetime) -> float:
     return _source_score(item, now) * max(0.85, 1.0 + 0.06 * _specificity_score(item))
 
 
 def representative_evidence(digest: TopicDigest) -> Optional[EvidenceItem]:
-    for item in digest.evidence:
-        if item.source not in TREND_ONLY_SOURCES:
-            return item
-    if digest.evidence:
-        return digest.evidence[0]
-    return None
+    candidates = [item for item in digest.evidence if item.source not in TREND_ONLY_SOURCES]
+    if not candidates:
+        if digest.evidence:
+            return digest.evidence[0]
+        return None
+    trusted_non_community = [
+        item
+        for item in candidates
+        if _publisher_quality(item) > 1.0 and item.source not in {"naver_blog", "naver_cafe"}
+    ]
+    if trusted_non_community:
+        return trusted_non_community[0]
+    non_community = [
+        item
+        for item in candidates
+        if item.source not in {"naver_blog", "naver_cafe"} and _publisher_quality(item) >= 1.0
+    ]
+    if non_community:
+        return non_community[0]
+    best_item = candidates[0]
+    best_score = float("-inf")
+    for index, item in enumerate(candidates):
+        score = (
+            3.0 * _publisher_quality(item)
+            + 1.2 * _representative_source_bonus(item)
+            + 0.35 * max(_specificity_score(item), 0.0)
+            - 0.05 * index
+        )
+        if score > best_score:
+            best_item = item
+            best_score = score
+    return best_item
 
 
 def rank_topics(
@@ -410,6 +497,10 @@ def summarize_reason(digest: TopicDigest) -> List[str]:
                 top_item.title,
             )
         )
+    if digest.topic.article_focus:
+        lines.append("기사화 포인트: {}".format(digest.topic.article_focus))
+    if digest.topic.reporting_points:
+        lines.append("발전시키는 법: {}".format(digest.topic.reporting_points))
     korean_count = sum(1 for item in digest.evidence if _is_korean_signal(item))
     if korean_count:
         lines.append("한국 독자 신호: 한국 소스 {}건이 함께 잡혔습니다.".format(korean_count))

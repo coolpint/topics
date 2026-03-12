@@ -15,6 +15,8 @@ class TopicDefinition:
     korea_queries: List[str] = field(default_factory=list)
     korea_relevance: float = 1.0
     story_bias: float = 1.0
+    article_focus: str = ""
+    reporting_points: str = ""
 
 
 @dataclass

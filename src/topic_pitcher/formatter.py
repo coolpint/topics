@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Iterable, List
 
 from .models import EvidenceItem, TopicDigest
-from .ranking import representative_evidence, summarize_reason
+from .ranking import TREND_ONLY_SOURCES, representative_evidence, summarize_reason
 
 
 KST = timezone(timedelta(hours=9))
@@ -63,6 +63,24 @@ def _display_headline(digest: TopicDigest, max_length: int = 90) -> str:
     return headline[: max_length - 3].rstrip() + "..."
 
 
+def _display_evidence(digest: TopicDigest, max_count: int) -> List[EvidenceItem]:
+    ordered: List[EvidenceItem] = []
+    representative = representative_evidence(digest)
+    if representative:
+        ordered.append(representative)
+    for item in digest.evidence:
+        if item in ordered:
+            continue
+        if item.source in TREND_ONLY_SOURCES and ordered:
+            continue
+        ordered.append(item)
+        if len(ordered) >= max_count:
+            break
+    if ordered:
+        return ordered[:max_count]
+    return digest.evidence[:max_count]
+
+
 def format_digest(
     digests: Iterable[TopicDigest],
     generated_at: datetime,
@@ -85,7 +103,7 @@ def format_digest(
         for reason in summarize_reason(digest):
             lines.append(reason)
         lines.append("근거 링크:")
-        for item in digest.evidence[:max_evidence_per_topic]:
+        for item in _display_evidence(digest, max_evidence_per_topic):
             lines.append(
                 "- {} | {} | {}".format(
                     item.publisher or item.source,

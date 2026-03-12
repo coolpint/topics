@@ -118,6 +118,8 @@ TOPIC_DEFINITIONS: List[TopicDefinition] = [
         ],
         korea_relevance=1.24,
         story_bias=1.22,
+        article_focus="사치 논란으로 끝내지 말고, 반려동물 미용·데이케어·보험 같은 세부 서비스가 어떻게 하나의 신산업으로 커지는지로 잡아야 한다.",
+        reporting_points="객단가가 얼마나 올라왔는지, 구독·보험·호텔 같은 연관 매출이 붙는지, 경기 둔화 속에서도 왜 이 지출만 버티는지 확인하면 된다.",
     ),
     TopicDefinition(
         slug="public_service_bottlenecks",
@@ -148,6 +150,8 @@ TOPIC_DEFINITIONS: List[TopicDefinition] = [
         ],
         korea_relevance=1.15,
         story_bias=1.22,
+        article_focus="공항 팁이나 대기줄 불만으로 끝내지 말고, 왜 특정 공항으로 수요가 몰리는지와 허브공항 포화·노선 재편이 어떻게 맞물리는지로 써야 한다.",
+        reporting_points="인천·김포 혼잡이 대체공항 수요를 키우는지, 슬롯·주차·보안검색 인력 중 어디가 병목인지, 여행객이 왜 청주 같은 선택지로 이동하는지 붙이면 된다.",
     ),
     TopicDefinition(
         slug="nuclear_decommissioning_workforce",
@@ -175,6 +179,8 @@ TOPIC_DEFINITIONS: List[TopicDefinition] = [
         ],
         korea_relevance=1.18,
         story_bias=1.25,
+        article_focus="원전 찬반 일반론보다, 폐로 현장의 한 사람·한 작업 공정이 어떤 비용과 기술·인력 시장을 만드는지로 풀어야 한다.",
+        reporting_points="누가 현장에 들어오는지, 훈련·안전장비·로봇 같은 연관 산업이 어떻게 붙는지, 지역경제와 세대교체까지 연결하면 기사가 선다.",
     ),
     TopicDefinition(
         slug="defense_export_supply_chain",
@@ -205,6 +211,8 @@ TOPIC_DEFINITIONS: List[TopicDefinition] = [
         ],
         korea_relevance=1.32,
         story_bias=1.24,
+        article_focus="안보 담론보다 공장 증설, 수주잔고, 부품 조달, 협력사 고용처럼 돈이 도는 장면으로 출발해야 한다.",
+        reporting_points="어느 기업·공장이 실제 수혜를 보는지, 납기와 부품 병목이 어디인지, 한국 협력사와 지역 일자리로 어떻게 번지는지 붙이면 된다.",
     ),
     TopicDefinition(
         slug="us_jobs_fed",
@@ -237,6 +245,8 @@ TOPIC_DEFINITIONS: List[TopicDefinition] = [
         ],
         korea_relevance=1.08,
         story_bias=0.95,
+        article_focus="Fed 미팅이나 CPI 숫자 자체보다, 이번 데이터가 연준의 금리인하 경로와 시장 기대를 어떻게 바꾸는지로 잡아야 한다.",
+        reporting_points="점도표나 발언 톤이 달라지는지, 2년물 금리·달러·주택대출 금리에 어떤 신호가 번지는지, 한국 증시·환율에 어떤 파급이 있는지 붙이면 된다.",
     ),
     TopicDefinition(
         slug="oil_inflation",
@@ -271,6 +281,8 @@ TOPIC_DEFINITIONS: List[TopicDefinition] = [
         ],
         korea_relevance=1.26,
         story_bias=0.96,
+        article_focus="유가 일반론보다 주유소 가격, 항공 유류할증료, 운임, 원재료비처럼 실제로 체감되는 한 지점을 앞세워야 한다.",
+        reporting_points="어느 가격표가 먼저 움직였는지, 소비자·항공사·물류업체 중 누가 먼저 맞는지, 그 변화가 물가와 금리 기대에 어떻게 번지는지 붙이면 된다.",
     ),
     TopicDefinition(
         slug="housing_mortgage",
@@ -302,6 +314,8 @@ TOPIC_DEFINITIONS: List[TopicDefinition] = [
         ],
         korea_relevance=1.05,
         story_bias=0.99,
+        article_focus="금리 숫자보다 실제 차주나 매수자의 행동 변화, 거래량, 갈아타기 움직임 같은 장면으로 시작해야 한다.",
+        reporting_points="첫 주택구매자·기존 차주·건설사 중 누가 먼저 반응하는지, 30년물 고정금리와 거래량이 어디서 변하는지 붙이면 된다.",
     ),
     TopicDefinition(
         slug="china_growth",
@@ -335,6 +349,8 @@ TOPIC_DEFINITIONS: List[TopicDefinition] = [
         ],
         korea_relevance=1.24,
         story_bias=0.95,
+        article_focus="성장목표 숫자 하나보다 수출 급증, 할인 경쟁, 재고 조정처럼 현장에서 포착되는 한 단면으로 풀어야 한다.",
+        reporting_points="어느 도시·업종·기업에서 주문이나 할인 압박이 나타나는지, 그 변화가 한국 수출·해운·반도체로 어떻게 이어지는지 붙이면 된다.",
     ),
     TopicDefinition(
         slug="ai_power_capex",
@@ -373,6 +389,8 @@ TOPIC_DEFINITIONS: List[TopicDefinition] = [
         ],
         korea_relevance=1.3,
         story_bias=1.15,
+        article_focus="AI 일반론이 아니라 특정 데이터센터, 전력계약, 변압기, 유틸리티 투자 같은 한 건의 사례로 시작해야 한다.",
+        reporting_points="누가 전력을 사들이는지, 송배전·변압기·가스·원전 중 어디에 돈이 붙는지, 어떤 기업이 수혜를 보는지 붙이면 된다.",
     ),
     TopicDefinition(
         slug="trade_tariffs",
@@ -405,5 +423,7 @@ TOPIC_DEFINITIONS: List[TopicDefinition] = [
         ],
         korea_relevance=1.18,
         story_bias=0.97,
+        article_focus="정치 뉴스처럼 다루지 말고, 법원 판단이나 관세 조정이 기업의 가격·재고·조달 전략을 어떻게 바꾸는지로 기사화해야 한다.",
+        reporting_points="자동차·철강·반도체 중 어느 업종이 먼저 가격 인상이나 선적 조정을 하는지, 한국 수출기업 비용에 어떻게 전가되는지 붙이면 된다.",
     ),
 ]
