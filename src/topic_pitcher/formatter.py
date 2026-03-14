@@ -1,55 +1,80 @@
+import re
 from datetime import datetime, timedelta, timezone
-from typing import Iterable, List
+from typing import Iterable, List, Optional, Tuple
 
 from .models import EvidenceItem, TopicDigest
 from .ranking import TREND_ONLY_SOURCES, representative_evidence, summarize_reason
 
 
 KST = timezone(timedelta(hours=9))
-
-
-def _metric_summary(item: EvidenceItem) -> str:
-    if item.source == "reddit":
-        return "업보트 {:.0f} / 댓글 {:.0f}".format(
-            item.metrics.get("score", 0.0),
-            item.metrics.get("comments", 0.0),
-        )
-    if item.source == "hacker_news":
-        return "점수 {:.0f} / 댓글 {:.0f}".format(
-            item.metrics.get("score", 0.0),
-            item.metrics.get("comments", 0.0),
-        )
-    if item.source == "youtube":
-        return "조회수 {:.0f} / 좋아요 {:.0f} / 댓글 {:.0f}".format(
-            item.metrics.get("views", 0.0),
-            item.metrics.get("likes", 0.0),
-            item.metrics.get("comments", 0.0),
-        )
-    if item.source == "bluesky":
-        return "좋아요 {:.0f} / 리포스트 {:.0f} / 답글 {:.0f}".format(
-            item.metrics.get("likes", 0.0),
-            item.metrics.get("reposts", 0.0),
-            item.metrics.get("replies", 0.0),
-        )
-    if item.source == "mastodon":
-        return "공유 {:.0f} / 계정 {:.0f}".format(
-            item.metrics.get("uses", 0.0),
-            item.metrics.get("accounts", 0.0),
-        )
-    if item.source == "naver_blog":
-        return "블로그 결과 {:.0f}".format(item.metrics.get("total", 0.0))
-    if item.source == "naver_cafe":
-        return "카페 결과 {:.0f}".format(item.metrics.get("total", 0.0))
-    if item.source == "naver_news":
-        return "검색 노출량 {:.0f}".format(item.metrics.get("total", 0.0))
-    if item.source == "naver_datalab":
-        return "검색지수 {:.1f} / 변화 {:+.1f}".format(
-            item.metrics.get("ratio", 0.0),
-            item.metrics.get("delta", 0.0),
-        )
-    if item.source == "google_news_kr":
-        return "한국 매체 확산 신호"
-    return "매체 확산 신호"
+STORY_LINK_EXCLUDED_SOURCES = {"naver_news", "naver_datalab", "naver_blog", "naver_cafe"}
+SCENE_HINTS = (
+    "wait",
+    "delay",
+    "queue",
+    "line",
+    "climbed",
+    "surge",
+    "drop",
+    "rose",
+    "rises",
+    "miss pay",
+    "buyers",
+    "workers",
+    "factory",
+    "airport",
+    "terminal",
+    "주유소",
+    "대기",
+    "상승",
+    "급등",
+    "작업",
+    "현장",
+    "공항",
+)
+CAUSE_HINTS = (
+    "shutdown",
+    "budget",
+    "staffing",
+    "hiring",
+    "court",
+    "tariff",
+    "rate",
+    "fed",
+    "inflation",
+    "payroll",
+    "power",
+    "energy",
+    "supply",
+    "투자",
+    "셧다운",
+    "예산",
+    "인력",
+    "관세",
+    "금리",
+    "연준",
+    "전력",
+    "공급망",
+)
+IMPACT_HINTS = (
+    "business",
+    "travel",
+    "consumer",
+    "market",
+    "exports",
+    "homebuying",
+    "mortgage",
+    "stocks",
+    "economy",
+    "spring break",
+    "수요",
+    "소비자",
+    "수출",
+    "주택",
+    "여행",
+    "시장",
+    "경기",
+)
 
 
 def _display_headline(digest: TopicDigest, max_length: int = 90) -> str:
@@ -81,6 +106,81 @@ def _display_evidence(digest: TopicDigest, max_count: int) -> List[EvidenceItem]
     return digest.evidence[:max_count]
 
 
+def _clean_title(item: EvidenceItem) -> str:
+    title = re.sub(r"\s+", " ", item.title).strip()
+    publisher = (item.publisher or "").strip()
+    if publisher:
+        for suffix in (" - {}".format(publisher), " | {}".format(publisher)):
+            if title.endswith(suffix):
+                title = title[: -len(suffix)].rstrip()
+    return title
+
+
+def _story_role(item: EvidenceItem) -> str:
+    haystack = "{} {}".format(item.title, item.snippet).lower()
+    scene_hits = sum(1 for term in SCENE_HINTS if term in haystack)
+    cause_hits = sum(1 for term in CAUSE_HINTS if term in haystack)
+    impact_hits = sum(1 for term in IMPACT_HINTS if term in haystack)
+    if scene_hits >= max(cause_hits, impact_hits) and scene_hits > 0:
+        return "현장 장면"
+    if cause_hits >= impact_hits and cause_hits > 0:
+        return "원인·배경"
+    if impact_hits > 0:
+        return "파급"
+    return "확인 근거"
+
+
+def _story_evidence(digest: TopicDigest, max_count: int = 3) -> List[Tuple[str, EvidenceItem]]:
+    candidates = []
+    for item in digest.evidence:
+        if item.source in STORY_LINK_EXCLUDED_SOURCES:
+            continue
+        if item.url in {e.url for _, e in candidates}:
+            continue
+        candidates.append((_story_role(item), item))
+    if not candidates:
+        return []
+    selected: List[Tuple[str, EvidenceItem]] = []
+    used_publishers = set()
+    for role in ("현장 장면", "원인·배경", "파급"):
+        match = next(
+            (
+                pair
+                for pair in candidates
+                if pair[0] == role and (pair[1].publisher or pair[1].source) not in used_publishers
+            ),
+            None,
+        )
+        if not match:
+            continue
+        selected.append(match)
+        used_publishers.add(match[1].publisher or match[1].source)
+        if len(selected) >= max_count:
+            return selected
+    for pair in candidates:
+        publisher = pair[1].publisher or pair[1].source
+        if publisher in used_publishers:
+            continue
+        selected.append(pair)
+        used_publishers.add(publisher)
+        if len(selected) >= max_count:
+            break
+    return selected
+
+
+def _story_memo(digest: TopicDigest) -> Optional[str]:
+    story_evidence = _story_evidence(digest)
+    if not story_evidence:
+        return None
+    fragments = []
+    for role, item in story_evidence:
+        fragments.append("{}은 '{}'".format(role, _clean_title(item)))
+    memo = "실제 기사 메모: {}가 같이 보입니다.".format(", ".join(fragments))
+    if digest.topic.article_focus:
+        memo += " 기사 초점은 {} ".format(digest.topic.article_focus.rstrip("."))
+    return memo.strip()
+
+
 def format_digest(
     digests: Iterable[TopicDigest],
     generated_at: datetime,
@@ -108,12 +208,17 @@ def format_digest(
         )
         for reason in summarize_reason(digest):
             lines.append(reason)
-        lines.append("근거 링크:")
-        for item in _display_evidence(digest, max_evidence_per_topic):
+        story_memo = _story_memo(digest)
+        if story_memo:
+            lines.append(story_memo)
+        lines.append("기사 근거 링크:")
+        story_links = _story_evidence(digest, max_evidence_per_topic + 1)
+        for role, item in story_links or [("확인 근거", evidence) for evidence in _display_evidence(digest, max_evidence_per_topic)]:
             lines.append(
-                "- {} | {} | {}".format(
+                "- {} | {} | {} | {}".format(
+                    role,
                     item.publisher or item.source,
-                    _metric_summary(item),
+                    _clean_title(item),
                     item.url,
                 )
             )

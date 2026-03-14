@@ -482,7 +482,6 @@ def summarize_reason(digest: TopicDigest) -> List[str]:
     evidence_count = len(digest.evidence)
     social_count = sum(1 for item in digest.evidence if _is_social(item))
     media_count = evidence_count - social_count
-    top_social = next((item for item in digest.evidence if _is_social(item)), None)
     lines = []
     lines.append(
         "왜 뽑았나: {}개 증거 중 소셜 {}건, 뉴스 {}건이 겹쳤습니다.".format(
@@ -501,60 +500,4 @@ def summarize_reason(digest: TopicDigest) -> List[str]:
         lines.append("기사화 포인트: {}".format(digest.topic.article_focus))
     if digest.topic.reporting_points:
         lines.append("발전시키는 법: {}".format(digest.topic.reporting_points))
-    korean_count = sum(1 for item in digest.evidence if _is_korean_signal(item))
-    if korean_count:
-        lines.append("한국 독자 신호: 한국 소스 {}건이 함께 잡혔습니다.".format(korean_count))
-    if top_social:
-        if top_social.source == "reddit":
-            lines.append(
-                "반응 신호: {}에서 업보트 {:.0f}, 댓글 {:.0f}.".format(
-                    top_social.publisher,
-                    top_social.metrics.get("score", 0.0),
-                    top_social.metrics.get("comments", 0.0),
-                )
-            )
-        elif top_social.source == "youtube":
-            lines.append(
-                "반응 신호: YouTube 영상 조회수 {:.0f}, 좋아요 {:.0f}, 댓글 {:.0f}.".format(
-                    top_social.metrics.get("views", 0.0),
-                    top_social.metrics.get("likes", 0.0),
-                    top_social.metrics.get("comments", 0.0),
-                )
-            )
-        elif top_social.source == "bluesky":
-            lines.append(
-                "반응 신호: Bluesky 좋아요 {:.0f}, 리포스트 {:.0f}, 답글 {:.0f}.".format(
-                    top_social.metrics.get("likes", 0.0),
-                    top_social.metrics.get("reposts", 0.0),
-                    top_social.metrics.get("replies", 0.0),
-                )
-            )
-        elif top_social.source == "mastodon":
-            lines.append(
-                "반응 신호: Mastodon 공유 {:.0f}, 계정 {:.0f}.".format(
-                    top_social.metrics.get("uses", 0.0),
-                    top_social.metrics.get("accounts", 0.0),
-                )
-            )
-        elif top_social.source == "naver_blog":
-            lines.append(
-                "반응 신호: 네이버 블로그 검색 결과 {:.0f}건.".format(
-                    top_social.metrics.get("total", 0.0),
-                )
-            )
-        elif top_social.source == "naver_cafe":
-            lines.append(
-                "반응 신호: 네이버 카페 검색 결과 {:.0f}건.".format(
-                    top_social.metrics.get("total", 0.0),
-                )
-            )
-        else:
-            lines.append(
-                "반응 신호: Hacker News 점수 {:.0f}, 댓글 {:.0f}.".format(
-                    top_social.metrics.get("score", 0.0),
-                    top_social.metrics.get("comments", 0.0),
-                )
-            )
-    lines.append("큰 그림: {}".format(digest.topic.why_now))
-    lines.append("경제 독자 관점: {}".format(digest.topic.reader_fit))
     return lines
