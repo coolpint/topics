@@ -43,3 +43,23 @@ class TopicDigest:
     unique_sources: Set[str] = field(default_factory=set)
     unique_publishers: Set[str] = field(default_factory=set)
     matched_keywords: Set[str] = field(default_factory=set)
+
+
+@dataclass
+class CaseSupport:
+    role: str
+    item: EvidenceItem
+    note: str = ""
+    resolved_url: str = ""
+
+
+@dataclass
+class CasePitch:
+    slug: str
+    headline: str
+    summary: str
+    angle: str
+    score: float = 0.0
+    evidence: List[EvidenceItem] = field(default_factory=list)
+    supports: List[CaseSupport] = field(default_factory=list)
+    terms: Set[str] = field(default_factory=set)

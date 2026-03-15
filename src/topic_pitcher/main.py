@@ -3,10 +3,11 @@ import json
 from datetime import datetime, timezone
 from typing import List
 
+from .article_fetch import fetch_article_context
+from .case_pipeline import build_case_pitches
 from .config import AppConfig
 from .formatter import format_digest
 from .history import load_history, save_history, select_fresh_topics
-from .ranking import rank_topics
 from .sources import collect_all_sources
 from .taxonomy import TOPIC_DEFINITIONS
 from .telegram import send_message
@@ -45,21 +46,24 @@ def _serialize(digests) -> List[dict]:
     for digest in digests:
         payload.append(
             {
-                "slug": digest.topic.slug,
-                "label": digest.topic.label,
-                "total_score": round(digest.total_score, 3),
-                "social_score": round(digest.social_score, 3),
-                "media_score": round(digest.media_score, 3),
+                "slug": digest.slug,
+                "headline": digest.headline,
+                "summary": digest.summary,
+                "angle": digest.angle,
+                "score": round(digest.score, 3),
                 "evidence": [
                     {
+                        "role": support.role,
+                        "note": support.note,
                         "source": item.source,
                         "publisher": item.publisher,
                         "title": item.title,
-                        "url": item.url,
+                        "url": support.resolved_url or item.url,
                         "published_at": item.published_at.isoformat(),
                         "metrics": item.metrics,
                     }
-                    for item in digest.evidence[:5]
+                    for support in digest.supports[:5]
+                    for item in [support.item]
                 ],
             }
         )
@@ -73,7 +77,12 @@ def main(argv=None) -> int:
     items, errors = collect_all_sources(config, TOPIC_DEFINITIONS)
     now = datetime.now(timezone.utc)
     history = load_history(args.history_path)
-    ranked_digests = rank_topics(items, TOPIC_DEFINITIONS, now=now, top_n=len(TOPIC_DEFINITIONS))
+    ranked_digests = build_case_pitches(
+        items,
+        now=now,
+        top_n=max(args.max_topics * 4, 12),
+        context_fetcher=fetch_article_context,
+    )
     digests, skipped_recent, used_recent_fallback = select_fresh_topics(
         ranked_digests,
         history,
@@ -83,11 +92,11 @@ def main(argv=None) -> int:
     notices = []
     if used_recent_fallback:
         notices.append(
-            "최근 30일 중복 회피 규칙에 걸린 주제만 남아, 이번 발송은 상위 중복 후보를 다시 포함했습니다."
+            "최근 30일 중복 회피 규칙에 걸린 사례만 남아, 이번 발송은 상위 중복 후보를 다시 포함했습니다."
         )
     elif skipped_recent:
         notices.append(
-            "최근 30일 안에 다룬 유사 주제 {}건은 제외했습니다.".format(len(skipped_recent))
+            "최근 30일 안에 다룬 유사 사례 {}건은 제외했습니다.".format(len(skipped_recent))
         )
     if args.json:
         print(

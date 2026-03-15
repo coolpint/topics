@@ -1,10 +1,7 @@
 import json
-from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, Iterable, List, Set, Tuple
-
-from .models import TopicDigest
+from typing import Any, Dict, Iterable, List, Set, Tuple
 
 
 STOPWORDS = {
@@ -55,12 +52,38 @@ def _extract_terms(text: str) -> Set[str]:
     return set(cleaned)
 
 
-def _digest_terms(digest: TopicDigest) -> Set[str]:
+def _pitch_slug(pitch: Any) -> str:
+    if hasattr(pitch, "slug"):
+        return getattr(pitch, "slug")
+    topic = getattr(pitch, "topic", None)
+    if topic is not None and hasattr(topic, "slug"):
+        return topic.slug
+    return ""
+
+
+def _pitch_label(pitch: Any) -> str:
+    if hasattr(pitch, "headline"):
+        return getattr(pitch, "headline")
+    topic = getattr(pitch, "topic", None)
+    if topic is not None and hasattr(topic, "label"):
+        return topic.label
+    return ""
+
+
+def _pitch_terms(pitch: Any) -> Set[str]:
     terms = set()
-    terms.update(_extract_terms(digest.topic.label))
-    terms.update(_extract_terms(" ".join(sorted(digest.matched_keywords))))
-    for item in digest.evidence[:2]:
-        terms.update(_extract_terms(item.title))
+    if hasattr(pitch, "terms"):
+        terms.update({term for term in getattr(pitch, "terms") if isinstance(term, str)})
+    if hasattr(pitch, "headline"):
+        terms.update(_extract_terms(getattr(pitch, "headline")))
+    if hasattr(pitch, "summary"):
+        terms.update(_extract_terms(getattr(pitch, "summary")))
+    topic = getattr(pitch, "topic", None)
+    if topic is not None:
+        terms.update(_extract_terms(getattr(topic, "label", "")))
+        terms.update(_extract_terms(" ".join(sorted(getattr(pitch, "matched_keywords", set())))))
+    for item in getattr(pitch, "evidence", [])[:2]:
+        terms.update(_extract_terms(getattr(item, "title", "")))
     return terms
 
 
@@ -75,14 +98,14 @@ def load_history(history_path: str) -> List[Dict[str, object]]:
 
 
 def select_fresh_topics(
-    digests: Iterable[TopicDigest],
+    digests: Iterable[Any],
     history: List[Dict[str, object]],
     now: datetime,
     limit: int,
     window_days: int = 30,
-) -> Tuple[List[TopicDigest], List[str], bool]:
+) -> Tuple[List[Any], List[str], bool]:
     ranked_digests = list(digests)
-    fresh: List[TopicDigest] = []
+    fresh: List[Any] = []
     skipped: List[str] = []
     used_recent_fallback = False
     cutoff = now - timedelta(days=window_days)
@@ -100,10 +123,10 @@ def select_fresh_topics(
         if parsed >= cutoff:
             recent_entries.append(entry)
     for digest in ranked_digests:
-        terms = _digest_terms(digest)
+        terms = _pitch_terms(digest)
         duplicate = False
         for entry in recent_entries:
-            if entry.get("slug") == digest.topic.slug:
+            if entry.get("slug") == _pitch_slug(digest):
                 duplicate = True
                 break
             old_terms = set(entry.get("terms", []))
@@ -111,7 +134,7 @@ def select_fresh_topics(
                 duplicate = True
                 break
         if duplicate:
-            skipped.append(digest.topic.label)
+            skipped.append(_pitch_label(digest))
             continue
         fresh.append(digest)
         if len(fresh) >= limit:
@@ -122,7 +145,7 @@ def select_fresh_topics(
     return fresh, skipped, used_recent_fallback
 
 
-def save_history(history_path: str, digests: Iterable[TopicDigest], now: datetime, keep_days: int = 90) -> None:
+def save_history(history_path: str, digests: Iterable[Any], now: datetime, keep_days: int = 90) -> None:
     path = Path(history_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     history = load_history(history_path)
@@ -144,10 +167,10 @@ def save_history(history_path: str, digests: Iterable[TopicDigest], now: datetim
         compact_history.append(
             {
                 "sent_at": now.isoformat(),
-                "slug": digest.topic.slug,
-                "label": digest.topic.label,
-                "top_title": digest.evidence[0].title if digest.evidence else "",
-                "terms": sorted(_digest_terms(digest)),
+                "slug": _pitch_slug(digest),
+                "label": _pitch_label(digest),
+                "top_title": getattr(digest.evidence[0], "title", "") if getattr(digest, "evidence", []) else "",
+                "terms": sorted(_pitch_terms(digest)),
             }
         )
     path.write_text(
