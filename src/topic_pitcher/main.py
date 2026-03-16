@@ -50,6 +50,7 @@ def _serialize(digests) -> List[dict]:
                 "headline": digest.headline,
                 "summary": digest.summary,
                 "angle": digest.angle,
+                "plan_points": digest.plan_points,
                 "score": round(digest.score, 3),
                 "evidence": [
                     {

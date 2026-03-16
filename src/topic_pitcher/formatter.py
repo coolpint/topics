@@ -28,7 +28,7 @@ def format_digest(
 ) -> str:
     digest_list = list(digests)
     lines = []
-    lines.append("[경제 발제 랭킹] {}".format(generated_at.astimezone(KST).strftime("%Y-%m-%d %H:%M KST")))
+    lines.append("[경제 발제] {}".format(generated_at.astimezone(KST).strftime("%Y-%m-%d %H:%M KST")))
     lines.append("")
     for notice in notices or []:
         lines.append(notice)
@@ -36,10 +36,12 @@ def format_digest(
         lines.append("")
     for index, digest in enumerate(digest_list, start=1):
         lines.append("{}. {}".format(index, digest.headline))
-        lines.append("기사 한 줄: {}".format(_trim(digest.summary, 220)))
-        if digest.angle:
-            lines.append("기사 초점: {}".format(_trim(digest.angle, 120)))
-        lines.append("근거:")
+        lines.append("발제: {}".format(_trim(digest.summary, 320)))
+        if digest.plan_points:
+            lines.append("기사 구성:")
+            for point in digest.plan_points[:4]:
+                lines.append("- {}".format(_trim(point, 140)))
+        lines.append("근거 기사:")
         for support in digest.supports[:3]:
             lines.append(
                 "- {} | {} | {} | {}".format(

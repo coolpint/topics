@@ -105,7 +105,29 @@ GENERIC_ECON_TERMS = {
     "환율",
 }
 ARTICLE_EXCLUDED_SOURCES = {"naver_blog", "naver_cafe", "naver_news", "naver_datalab"}
-NEWSLIKE_SOURCES = {"google_news", "google_news_kr", "youtube", "mastodon"}
+PRIMARY_ARTICLE_SOURCES = {"google_news", "google_news_kr"}
+DISCOVERY_SOURCES = {"google_news", "google_news_kr", "mastodon"}
+GENERIC_NOTE_MARKERS = (
+    "enjoy the videos and music you love",
+    "upload original content",
+    "share it all with friends",
+    "watch the video",
+    "comprehensive up-to-date news coverage",
+)
+MACRO_SENSITIVE_FRAMES = {"jobs", "housing", "china", "trade", "ai_power", "oil"}
+FRAME_TAKEAWAYS = {
+    "airport": "이 사안의 핵심은 예산·인력 문제가 공항 현장의 대기줄과 여행 소비 불편으로 전가된다는 점이다.",
+    "oil": "핵심은 지정학 이슈가 추상적인 유가 전망이 아니라 운임·주유소 가격·생활물가 압박으로 내려온다는 데 있다.",
+    "housing": "핵심은 금리 방향보다 먼저 실수요자와 매도자의 행동이 바뀌고 있다는 점이다.",
+    "ai_power": "핵심은 AI 투자 경쟁의 병목이 모델이 아니라 전력망과 설비 계약이라는 점이다.",
+    "jobs": "핵심은 지표 한 줄이 아니라 그 해석 변화가 대출금리와 자산가격 판단까지 건드린다는 점이다.",
+    "defense": "핵심은 방산 호황이 주문 규모보다 생산능력과 납기 관리에서 승부가 난다는 점이다.",
+    "pet": "핵심은 취향 소비처럼 보이는 지출이 실제로는 새 서비스 산업을 키우고 있다는 점이다.",
+    "trade": "핵심은 정책 변화가 결국 기업의 가격·재고·조달 전략을 바꾸는 비용 이슈라는 점이다.",
+    "nuclear": "핵심은 폐로 현장 노동과 기술 문제가 원전 비용과 지역 산업 문제로 이어진다는 점이다.",
+    "china": "핵심은 중국 수요 회복을 거시지표가 아니라 현장 산업 수요와 물동량으로 읽어야 한다는 점이다.",
+    "generic": "핵심은 현장에서 벌어진 변화가 비용, 수요, 투자 판단으로 번지는 경로를 보여주는 데 있다.",
+}
 ROLE_TERMS = {
     "scene": {
         "wait",
@@ -165,13 +187,17 @@ ROLE_TERMS = {
         "business",
         "consumer",
         "consumers",
+        "cost",
+        "costs",
         "exports",
         "homebuying",
         "mortgage",
         "market",
+        "rates",
         "stocks",
         "spring break",
         "surcharge",
+        "운임",
         "travelers",
         "여행",
         "소비자",
@@ -261,7 +287,7 @@ def _item_score(item: EvidenceItem, now: datetime) -> float:
     score += max(_specificity_score(item), 0.0) * 2.2
     score += max(_publisher_quality(item) - 1.0, 0.0) * 2.0
     score += min(len(_extract_terms(item)), 6) * 0.18
-    if item.source in NEWSLIKE_SOURCES:
+    if item.source in DISCOVERY_SOURCES:
         score += 0.7
     if item.source in ARTICLE_EXCLUDED_SOURCES:
         score *= 0.45
@@ -381,78 +407,207 @@ def _location_hint(item: EvidenceItem) -> str:
     return ""
 
 
+def _case_hint(anchor: EvidenceItem, cluster_terms: Set[str]) -> str:
+    location = _location_hint(anchor)
+    if location:
+        return location
+    for term in sorted(cluster_terms, key=lambda value: (-len(value), value)):
+        if len(term) < 4:
+            continue
+        if term in GENERIC_ECON_TERMS or term in CASE_STOPWORDS:
+            continue
+        return term
+    return ""
+
+
+def _clean_note_text(text: str) -> str:
+    cleaned = " ".join((text or "").split()).strip()
+    if not cleaned:
+        return ""
+    lowered = cleaned.lower()
+    if any(marker in lowered for marker in GENERIC_NOTE_MARKERS):
+        return ""
+    return cleaned.rstrip()
+
+
 def _support_note(item: EvidenceItem, context: Optional[ArticleContext]) -> str:
-    if context and context.summary:
-        return context.summary
+    for candidate in (
+        context.summary if context else "",
+        item.snippet,
+        _clean_title(item),
+    ):
+        cleaned = _clean_note_text(candidate)
+        if cleaned:
+            return cleaned
     return _clean_title(item)
 
 
+def _is_reportable_article(item: EvidenceItem) -> bool:
+    return item.source in PRIMARY_ARTICLE_SOURCES and _publisher_quality(item) >= 0.75
+
+
+def _support_text(support: Optional[CaseSupport]) -> str:
+    if not support:
+        return ""
+    return _clean_note_text(support.note or support.item.snippet or _clean_title(support.item))
+
+
+def _render_point(label: str, text: str) -> str:
+    cleaned = _clean_note_text(text)
+    if not cleaned:
+        return ""
+    return "{}: {}".format(label, cleaned.rstrip("."))
+
+
+def _frame_headline(frame: str, anchor: EvidenceItem, cluster_terms: Set[str]) -> str:
+    hint = _case_hint(anchor, cluster_terms)
+    if frame == "airport":
+        return "{} 공항 대기줄이 길어진 이유, 셧다운이 여행 성수기를 덮쳤다".format(hint or "허브")
+    if frame == "oil":
+        return "{} 공급 차질이 기름값을 다시 흔드는 이유".format(hint or "원유 수송로")
+    if frame == "housing":
+        return "{} 사례로 본 금리 변곡점 이후 주택 실수요 변화".format(hint or "최근 시장")
+    if frame == "ai_power":
+        return "{} 사례로 본 AI 전력 병목".format(hint or "데이터센터 투자")
+    if frame == "jobs":
+        return "{}를 앞두고 물가와 고용이 충돌했다".format(hint or "Fed 회의")
+    if frame == "defense":
+        return "{} 사례로 본 K-방산 호황의 병목".format(hint or "방산 수출")
+    if frame == "pet":
+        return "{} 사례로 본 반려동물 프리미엄 소비".format(hint or "펫케어")
+    if frame == "trade":
+        return "{} 변수 하나가 기업 비용을 바꿨다".format(hint or "관세")
+    if frame == "nuclear":
+        return "{} 폐로 현장이 보여준 원전 경제".format(hint or "후쿠시마")
+    if frame == "china":
+        return "{} 사례로 읽는 중국 수요의 온도차".format(hint or "수출 현장")
+    return _clean_title(anchor)
+
+
 def _frame_summary(frame: str, supports: Dict[str, CaseSupport], anchor: EvidenceItem) -> str:
-    location = _location_hint(anchor)
+    location = _location_hint(anchor) or "현장"
     if frame == "airport":
-        parts = [
-            "{} 공항 대기시간 상승이 현장으로 잡혔다.".format(location or "허브"),
-            "셧다운과 TSA 운영 차질이 배경으로 붙는다." if "cause" in supports else "",
-            "여행 성수기 수요와 겹치며 공항 병목이 소비자 불편으로 번지는 그림이다." if "impact" in supports else "",
-        ]
-        return " ".join(part for part in parts if part)
+        return (
+            "{} 공항 대기시간 급증은 단순한 여행 팁이 아니라 연방 예산 차질이 여행 소비 현장에 닿는 장면이다. "
+            "셧다운 여파로 흔들린 TSA 운영이 성수기 수요와 겹치면서 혼잡과 서비스 부담이 커졌고, "
+            "결국 공항 병목이 승객 불편과 운영 비용 문제로 번졌다는 흐름이 선명하다."
+        ).format(location)
     if frame == "oil":
-        parts = [
-            "{} 관련 공급 차질이 먼저 잡혔다.".format(location or "원유 터미널"),
-            "전쟁·해상 리스크가 배경으로 붙고," if "cause" in supports else "",
-            "유가와 물류비, 인플레이션 기대를 함께 흔드는 사안이다." if "impact" in supports else "유가와 물류비를 함께 흔드는 사안이다.",
-        ]
-        return " ".join(part for part in parts if part)
+        return (
+            "{} 공급 차질은 추상적인 유가 전망이 아니라 실제 운임과 주유소 가격 압박으로 이어질 수 있는 사례다. "
+            "전쟁·해상 리스크와 수송 우회 비용이 겹치면서, 에너지 이슈가 생활물가와 기업 비용 문제로 내려오는 경로가 드러난다."
+        ).format(location)
     if frame == "housing":
-        return "모기지 금리 변화가 실수요자 의사결정과 주택시장 회복 기대를 동시에 흔드는 사례다."
+        return (
+            "이 사례는 금리 방향이 바뀌는 순간 실제 주택 매수자와 매도자의 판단이 어떻게 달라지는지 보여준다. "
+            "대출금리, 재고, 매도자 기대가 함께 움직이면서 시장 회복의 속도가 갈리는 장면으로 읽을 수 있다."
+        )
     if frame == "ai_power":
-        return "데이터센터 전력 수요가 전력망 투자와 비용 전가 문제로 번지는 장면이 잡혔다."
+        return (
+            "AI 투자 붐의 진짜 병목이 모델 경쟁이 아니라 전력망과 설비 계약이라는 점을 보여주는 사례다. "
+            "데이터센터 증설이 전기요금, 변압기, 전력 계약 문제와 부딪히며 투자 속도와 비용 구조를 동시에 흔든다."
+        )
     if frame == "jobs":
-        return "고용지표 변화가 금리 경로와 소비·주택시장 기대를 동시에 흔드는 사례다."
+        return (
+            "이번 사례는 Fed 회의를 앞두고 물가와 고용 지표가 엇갈릴 때 시장이 왜 방향을 잃는지 보여준다. "
+            "문제는 숫자 자체보다 해석의 변화가 대출금리와 자산가격 판단으로 바로 번진다는 점이다."
+        )
     if frame == "defense":
-        return "방산 주문이 공장 증설, 납기, 협력사 공급망 문제로 이어지는 장면이 모였다."
+        return (
+            "이 사례는 K-방산 호황의 핵심 병목이 수주 숫자보다 생산능력과 납기 관리에 있다는 점을 보여준다. "
+            "주문 확대가 곧바로 실적으로 이어지지 않고, 공장 증설과 협력사 조달 부담이 함께 커지는 구조가 드러난다."
+        )
     if frame == "pet":
-        return "반려동물 소비가 취향 지출이 아니라 서비스 산업 확대 사례로 잡혔다."
+        return (
+            "이 사례는 반려동물 소비가 단순한 사치가 아니라 고가 서비스 산업으로 커지고 있음을 보여준다. "
+            "가계의 취향 지출이 미용, 돌봄, 보험 같은 세분 시장을 키우는 흐름으로 읽을 수 있다."
+        )
     if frame == "trade":
-        return "정책·법원 변수 하나가 가격, 재고, 수출 전략으로 번지는 사례다."
+        return (
+            "이 사례는 관세나 법원 변수 같은 정책 변화가 실제 기업 비용과 재고 전략을 어떻게 바꾸는지 보여준다. "
+            "무역 뉴스가 추상적인 정책 논쟁이 아니라 가격과 조달 문제라는 점이 드러난다."
+        )
     if frame == "nuclear":
-        return "폐로 현장 인력 문제가 원전 비용과 지역 산업 문제로 이어지는 장면이다."
+        return (
+            "이 사례는 폐로 현장 노동과 기술 문제가 원전 비용과 지역경제 문제로 이어지는 장면을 보여준다. "
+            "에너지 정책이 결국 사람과 작업 현장의 비용으로 나타난다는 점이 선명하다."
+        )
     if frame == "china":
-        return "중국 수요·수출 변화가 내수 회복보다 산업·해운 파급으로 읽히는 사례다."
-    role_labels = {
-        "scene": "현장 장면",
-        "cause": "원인",
-        "impact": "파급",
-    }
-    joined = ", ".join(
-        "{} '{}'".format(role_labels.get(role, "근거"), _clean_title(support.item))
-        for role, support in supports.items()
-    )
-    return "{}가 같은 사건의 다른 단면을 보여준다.".format(joined or _clean_title(anchor))
+        return (
+            "이 사례는 중국 경기 회복을 거시 숫자보다 현장 수요와 물동량으로 읽어야 한다는 점을 보여준다. "
+            "내수와 수출의 온도차가 산업별 수혜와 리스크를 다르게 만든다는 흐름이 잡힌다."
+        )
+    scene = _support_text(supports.get("scene"))
+    cause = _support_text(supports.get("cause"))
+    impact = _support_text(supports.get("impact"))
+    parts = [part for part in (scene, cause, impact) if part]
+    if not parts:
+        parts.append(_clean_title(anchor))
+    parts.append(FRAME_TAKEAWAYS.get(frame, FRAME_TAKEAWAYS["generic"]))
+    return " ".join(part.rstrip(".") + "." for part in parts)
 
 
-def _frame_angle(frame: str) -> str:
+def _plan_points(frame: str, supports: Dict[str, CaseSupport], anchor: EvidenceItem) -> List[str]:
+    location = _location_hint(anchor) or "현장"
+    points: List[str] = []
     if frame == "airport":
-        return "셧다운이 공항 혼잡과 여행 소비 차질로 번지는 구조"
+        points.append("현장: {} 공항에서 보안검색 대기시간이 최근 실제로 길어졌다는 보도가 나왔다".format(location))
+        points.append("배경: 셧다운 여파로 TSA 운영 차질이 여행 성수기 수요와 겹쳤다")
+        points.append("파급: 승객 불편뿐 아니라 공항 운영 부담과 여행 소비 차질이 함께 커지고 있다")
+        return points
     if frame == "oil":
-        return "특정 공급 차질이 유가와 생활물가 압박으로 이어지는 구조"
+        points.append("현장: {} 관련 공급 차질이 유가 전망이 아니라 실제 운임과 정제 비용 문제로 번지고 있다".format(location))
+        points.append("배경: 전쟁·해상 리스크와 우회 운송 비용이 공급망을 흔들고 있다")
+        points.append("파급: 결국 주유소 가격과 생활물가 압박으로 연결될 수 있다")
+        return points
     if frame == "housing":
-        return "금리 변곡점이 실수요자·매도자 판단을 바꾸는 구조"
+        points.append("현장: 금리 방향 변화에 따라 주택 실수요자의 매수·대기 판단이 갈리고 있다")
+        points.append("배경: 대출금리뿐 아니라 재고와 매도자 기대가 함께 움직이고 있다")
+        points.append("파급: 거래량 회복과 가격 반등의 속도가 지역별로 달라질 수 있다")
+        return points
     if frame == "ai_power":
-        return "AI 투자 붐이 전력비와 설비투자 부담으로 전가되는 구조"
+        points.append("현장: 데이터센터 증설이 전력망, 변압기, 전력 계약 문제와 부딪히고 있다")
+        points.append("배경: AI 투자 속도를 전력 인프라가 따라가지 못하고 있다")
+        points.append("파급: 기업 CAPEX와 전기요금 전가 부담이 동시에 커진다")
+        return points
     if frame == "jobs":
-        return "고용 둔화가 금리 기대와 가계 체감 변수로 번지는 구조"
+        points.append("현장: Fed 회의를 앞두고 물가와 고용 지표가 엇갈리며 시장 해석이 갈리고 있다")
+        points.append("배경: 고용 둔화 우려와 물가 상방 압력이 동시에 남아 있다")
+        points.append("파급: 주식·채권뿐 아니라 모기지와 대출금리 판단에도 바로 연결된다")
+        return points
     if frame == "defense":
-        return "수주 확대가 공장·협력사·납기 병목으로 이어지는 구조"
+        points.append("현장: 방산 주문 확대가 실제 공장 증설과 납기 관리 문제로 이어지고 있다")
+        points.append("배경: 완성품 수주보다 협력사 부품 조달과 생산능력 확보가 더 큰 병목으로 떠오른다")
+        points.append("파급: 수출 호황이 곧바로 실적으로 이어지지 않고 CAPEX 부담과 납기 리스크를 키운다")
+        return points
     if frame == "pet":
-        return "취향 소비가 서비스 신산업으로 커지는 구조"
+        points.append("현장: 반려동물 관련 고가 서비스 소비가 빠르게 커지고 있다")
+        points.append("배경: 미용·돌봄·보험처럼 세분화된 서비스 시장이 붙고 있다")
+        points.append("파급: 취향 지출이 하나의 생활서비스 산업으로 굳어지고 있다")
+        return points
     if frame == "trade":
-        return "정책 변화가 기업 가격·재고 전략으로 내려오는 구조"
+        points.append("현장: 정책·법원 변수 하나가 기업 가격과 재고 전략을 흔들고 있다")
+        points.append("배경: 관세와 조달 비용 변화가 공급망 운영 방식까지 바꾸고 있다")
+        points.append("파급: 수출 기업과 소비자 가격에 동시에 영향을 줄 수 있다")
+        return points
     if frame == "nuclear":
-        return "폐로 현장 노동이 에너지 비용과 지역경제 문제로 이어지는 구조"
+        points.append("현장: 폐로 작업 현장 인력과 기술 문제가 계속 드러나고 있다")
+        points.append("배경: 작업 난도와 장기 비용 부담이 예상보다 크다")
+        points.append("파급: 원전 경제성과 지역 산업 문제를 함께 다시 보게 만든다")
+        return points
     if frame == "china":
-        return "중국 내수·수출 변화가 한국 산업 수요로 이어지는 구조"
-    return "현장과 원인, 파급이 한 사건으로 묶이는 구조"
+        points.append("현장: 중국 수요 회복이 일부 산업과 물동량에서만 먼저 나타난다")
+        points.append("배경: 내수와 수출의 회복 속도가 다르게 움직이고 있다")
+        points.append("파급: 한국 기업별 수혜와 리스크가 더 선명하게 갈릴 수 있다")
+        return points
+    for role_name, label in (("scene", "현장"), ("cause", "배경"), ("impact", "파급")):
+        point = _render_point(label, _support_text(supports.get(role_name)))
+        if point:
+            points.append(point)
+    if not points:
+        points.append("근거: {}".format(_clean_title(anchor)))
+    points.append("쟁점: {}".format(FRAME_TAKEAWAYS.get(frame, FRAME_TAKEAWAYS["generic"]).rstrip(".")))
+    return points[:4]
 
 
 def _slug_from_terms(anchor: EvidenceItem, terms: Set[str]) -> str:
@@ -473,29 +628,32 @@ def _cluster_to_pitch(
     now: datetime,
     context_fetcher: Optional[Callable[[str], ArticleContext]],
 ) -> Optional[CasePitch]:
-    article_items = [item for item in cluster.items if item.source not in ARTICLE_EXCLUDED_SOURCES]
-    newslike_count = sum(1 for item in article_items if item.source in NEWSLIKE_SOURCES)
-    if not article_items or newslike_count == 0:
+    reportable_articles = [item for item in cluster.items if _is_reportable_article(item)]
+    if not reportable_articles:
         return None
-    ranked_articles = sorted(article_items, key=lambda value: _item_score(value, now), reverse=True)
+    ranked_articles = sorted(reportable_articles, key=lambda value: _item_score(value, now), reverse=True)
     scene_candidates = [
         item
         for item in ranked_articles
-        if item.source in NEWSLIKE_SOURCES and _role(item) == "scene"
+        if _role(item) == "scene"
     ]
     scene_candidates.sort(key=lambda value: _anchor_score(value, now), reverse=True)
     anchor = scene_candidates[0] if scene_candidates else next(
-        (
-            item
-            for item in ranked_articles
-            if item.source in NEWSLIKE_SOURCES
-        ),
+        (item for item in ranked_articles),
         ranked_articles[0],
     )
+    if len(reportable_articles) == 1 and _publisher_quality(anchor) < 1.2:
+        return None
     supports: List[CaseSupport] = []
-    for role_name, item in _choose_supports(cluster, now):
+    article_cluster = _CaseCluster(
+        anchor=anchor,
+        items=reportable_articles,
+        terms=set(cluster.terms),
+        topic_hints=set(cluster.topic_hints),
+    )
+    for role_name, item in _choose_supports(article_cluster, now):
         context = None
-        if context_fetcher and item.source in NEWSLIKE_SOURCES:
+        if context_fetcher and item.source in PRIMARY_ARTICLE_SOURCES:
             try:
                 context = context_fetcher(item.url)
             except Exception:
@@ -511,33 +669,34 @@ def _cluster_to_pitch(
     support_map = {support.role: support for support in supports}
     frame = _detect_frame(cluster)
     role_count = len(set(support.role for support in supports))
-    if len(cluster.items) == 1 and role_count <= 1 and _specificity_score(anchor) < 1.1:
+    if "scene" not in support_map:
+        return None
+    if role_count < 2:
+        return None
+    if frame in MACRO_SENSITIVE_FRAMES and _specificity_score(anchor) < 0.9:
+        return None
+    if len(reportable_articles) == 1 and role_count <= 1 and _specificity_score(anchor) < 1.1:
         return None
     cluster_score = (
         _item_score(anchor, now) * 1.8
-        + len(article_items) * 0.55
+        + len(reportable_articles) * 0.75
         + len({item.publisher for item in cluster.items}) * 0.25
-        + sum(1 for item in article_items if _publisher_quality(item) > 1.0) * 0.9
+        + sum(1 for item in reportable_articles if _publisher_quality(item) > 1.0) * 0.9
         + len(supports) * 0.75
     )
     social_support = sum(_item_score(item, now) for item in cluster.items if _is_social(item))
-    cluster_score += min(social_support, 12.0) * 0.18
-    if "scene" not in support_map:
-        cluster_score *= 0.82
-    if role_count == 1:
-        cluster_score *= 0.58
-    elif role_count == 2:
-        cluster_score *= 0.82
-    headline = _clean_title(anchor)
+    cluster_score += min(social_support, 10.0) * 0.08
+    headline = _frame_headline(frame, anchor, cluster.terms)
     return CasePitch(
         slug=_slug_from_terms(anchor, cluster.terms),
         headline=headline,
         summary=_frame_summary(frame, support_map, anchor),
-        angle=_frame_angle(frame),
+        angle=FRAME_TAKEAWAYS.get(frame, FRAME_TAKEAWAYS["generic"]),
         score=cluster_score,
-        evidence=article_items,
+        evidence=reportable_articles,
         supports=supports,
         terms=set(cluster.terms),
+        plan_points=_plan_points(frame, support_map, anchor),
     )
 
 

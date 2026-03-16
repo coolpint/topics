@@ -54,9 +54,11 @@ class CasePipelineTests(unittest.TestCase):
         ]
         pitches = build_case_pitches(items, now=NOW, top_n=3, context_fetcher=None)
         self.assertEqual(len(pitches), 1)
-        self.assertIn("Atlanta airport wait times", pitches[0].headline)
+        self.assertIn("공항", pitches[0].headline)
+        self.assertIn("셧다운", pitches[0].headline)
         self.assertIn("공항", pitches[0].summary)
         self.assertEqual([support.role for support in pitches[0].supports[:3]], ["scene", "cause", "impact"])
+        self.assertGreaterEqual(len(pitches[0].plan_points), 3)
 
     def test_specific_case_outranks_generic_macro_title(self):
         items = [
@@ -74,22 +76,20 @@ class CasePipelineTests(unittest.TestCase):
             ),
             make_item(
                 "google_news",
-                "U.S. allows temporary purchases of Russian oil already at sea to stabilize energy markets - AP",
-                "AP",
+                "Insurers raise premiums on tankers near Kharg Island after terminal disruption - FT",
+                "FT",
                 topic_hint="oil_inflation",
             ),
             make_item(
-                "reddit",
-                "More bad news for oil. Thermal anomalies on Kharg Island's oil terminal contradict claims infrastructure wasn't targeted.",
-                "r/stocks",
-                metrics={"score": 700, "comments": 250},
-                source_type="social",
+                "google_news",
+                "Asian refiners brace for costlier crude shipments from Kharg Island - Nikkei",
+                "Nikkei",
                 topic_hint="oil_inflation",
             ),
         ]
         pitches = build_case_pitches(items, now=NOW, top_n=3, context_fetcher=None)
         self.assertGreaterEqual(len(pitches), 1)
-        self.assertIn("Kharg", pitches[0].headline)
+        self.assertIn("기름값", pitches[0].headline)
         self.assertNotEqual(pitches[0].headline, "Oil prices rise as inflation worries grow")
 
     def test_community_search_results_alone_do_not_force_a_pitch(self):
@@ -111,6 +111,28 @@ class CasePipelineTests(unittest.TestCase):
         ]
         pitches = build_case_pitches(items, now=NOW, top_n=3, context_fetcher=None)
         self.assertEqual(len(pitches), 0)
+
+    def test_youtube_only_case_does_not_become_pitch(self):
+        items = [
+            make_item(
+                "youtube",
+                "한국 방산이 세계 시장에서 급성장하는 3가지 이유",
+                "기술왕",
+                metrics={"views": 100000, "likes": 4200, "comments": 320},
+                source_type="social",
+                topic_hint="defense",
+            ),
+            make_item(
+                "youtube",
+                "K-Defense boom explained",
+                "썰원",
+                metrics={"views": 90000, "likes": 3500, "comments": 210},
+                source_type="social",
+                topic_hint="defense",
+            ),
+        ]
+        pitches = build_case_pitches(items, now=NOW, top_n=3, context_fetcher=None)
+        self.assertEqual(pitches, [])
 
 
 if __name__ == "__main__":

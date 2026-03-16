@@ -63,3 +63,4 @@ class CasePitch:
     evidence: List[EvidenceItem] = field(default_factory=list)
     supports: List[CaseSupport] = field(default_factory=list)
     terms: Set[str] = field(default_factory=set)
+    plan_points: List[str] = field(default_factory=list)
